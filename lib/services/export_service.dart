@@ -79,12 +79,12 @@ class ExportService {
         pw.Text('PeptideTrack Report',
           style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: teal)),
         pw.SizedBox(height: 6),
-        pw.Text('Generated $dateStr · ${devices.length} containers · ${logs.length} dose logs',
+        pw.Text('Generated $dateStr · ${devices.length} compounds · ${logs.length} dose logs',
           style: pw.TextStyle(fontSize: 12, color: textSec)),
         pw.SizedBox(height: 28),
 
         // Devices table
-        pw.Text('Registered Containers',
+        pw.Text('Registered Compounds',
           style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
         pw.SizedBox(height: 10),
         pw.Table(
@@ -112,7 +112,7 @@ class ExportService {
                 d.name,
                 d.type.name,
                 d.vendor,
-                '${d.desiredDoseMcg.toStringAsFixed(0)}mcg / ${d.doseVolumeIu.toStringAsFixed(0)}IU',
+                '${d.desiredDoseMcg.toStringAsFixed(0)}mcg / ${d.doseVolumeIu.toStringAsFixed(1)}IU',
                 '${d.remainingDoses}/${d.totalDoses}',
                 d.schedule.label,
               ].map((v) => pw.Padding(
@@ -124,46 +124,68 @@ class ExportService {
         ),
         pw.SizedBox(height: 28),
 
-        // Logs table
-        pw.Text('Dose History${logs.length > 200 ? ' (latest 200)' : ''}',
+        // Dose History — one table per compound
+        pw.Text('Dose History',
           style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
         pw.SizedBox(height: 10),
-        pw.Table(
-          border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
-          columnWidths: {
-            0: const pw.FlexColumnWidth(2),
-            1: const pw.FlexColumnWidth(1.5),
-            2: const pw.FlexColumnWidth(1.2),
-            3: const pw.FlexColumnWidth(1),
-            4: const pw.FlexColumnWidth(1.2),
-            5: const pw.FlexColumnWidth(1),
-          },
-          children: [
-            pw.TableRow(
+
+        ...devices.expand((device) {
+          final deviceLogs = logs
+              .where((l) => l.deviceId == device.id)
+              .toList()
+            ..sort((a, b) => b.loggedAt.compareTo(a.loggedAt));
+          if (deviceLogs.isEmpty) return <pw.Widget>[];
+
+          return [
+            // Compound sub-header
+            pw.Container(
+              padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: pw.BoxDecoration(color: tealLight),
-              children: ['Compound','Date','Time','Method','Dose mcg','Dose IU']
-                .map((h) => pw.Padding(
-                  padding: const pw.EdgeInsets.all(7),
-                  child: pw.Text(h, style: pw.TextStyle(
-                    fontWeight: pw.FontWeight.bold, fontSize: 10, color: teal)),
-                )).toList(),
+              child: pw.Row(children: [
+                pw.Text(device.name,
+                  style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: teal)),
+                pw.SizedBox(width: 8),
+                pw.Text(
+                  '${device.desiredDoseMcg.toStringAsFixed(0)}mcg / ${device.doseVolumeIu.toStringAsFixed(1)}IU  ·  ${deviceLogs.length} dose${deviceLogs.length == 1 ? '' : 's'}',
+                  style: pw.TextStyle(fontSize: 9, color: textSec)),
+              ]),
             ),
-            ...logs.take(200).map((l) {
-              final device = devices.where((d) => d.id == l.deviceId).firstOrNull;
-              return pw.TableRow(children: [
-                device?.name ?? '—',
-                DateFormat('MMM d, yyyy').format(l.loggedAt),
-                DateFormat('h:mm a').format(l.loggedAt),
-                l.method.name,
-                l.doseMcg.toStringAsFixed(0),
-                l.doseIu.toStringAsFixed(0),
-              ].map((v) => pw.Padding(
-                padding: const pw.EdgeInsets.all(6),
-                child: pw.Text(v, style: const pw.TextStyle(fontSize: 9)),
-              )).toList());
-            }),
-          ],
-        ),
+            pw.Table(
+              border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+              columnWidths: {
+                0: const pw.FlexColumnWidth(2),
+                1: const pw.FlexColumnWidth(1.2),
+                2: const pw.FlexColumnWidth(1),
+                3: const pw.FlexColumnWidth(1.2),
+                4: const pw.FlexColumnWidth(1.2),
+                5: const pw.FlexColumnWidth(2),
+              },
+              children: [
+                pw.TableRow(
+                  decoration: pw.BoxDecoration(color: PdfColors.grey100),
+                  children: ['Date','Time','Method','Dose mcg','Dose IU','Site / Notes']
+                    .map((h) => pw.Padding(
+                      padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+                      child: pw.Text(h, style: pw.TextStyle(
+                        fontWeight: pw.FontWeight.bold, fontSize: 9, color: textSec)),
+                    )).toList(),
+                ),
+                ...deviceLogs.map((l) => pw.TableRow(children: [
+                  DateFormat('MMM d, yyyy').format(l.loggedAt),
+                  DateFormat('h:mm a').format(l.loggedAt),
+                  l.method.name == 'nfc' ? 'NFC' : 'Manual',
+                  l.doseMcg.toStringAsFixed(0),
+                  l.doseIu.toStringAsFixed(1),
+                  [l.injectionSite, l.notes].whereType<String>().join(' · '),
+                ].map((v) => pw.Padding(
+                  padding: const pw.EdgeInsets.all(5),
+                  child: pw.Text(v, style: const pw.TextStyle(fontSize: 9)),
+                )).toList())),
+              ],
+            ),
+            pw.SizedBox(height: 18),
+          ];
+        }),
       ],
     ));
 

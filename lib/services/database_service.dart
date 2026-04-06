@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/device.dart';
 import '../models/dose_log.dart';
+import '../models/protocol.dart';
 
 class DatabaseService {
   DatabaseService._();
@@ -17,8 +18,9 @@ class DatabaseService {
     final dbPath = await getDatabasesPath();
     _db = await openDatabase(
       join(dbPath, 'peptidetrack.db'),
-      version: 1,
+      version: 4,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -39,6 +41,7 @@ class DatabaseService {
         total_doses INTEGER NOT NULL,
         remaining_doses INTEGER NOT NULL,
         schedule TEXT NOT NULL,
+        schedule_days TEXT,
         nfc_tag_id TEXT,
         alert_threshold_pct INTEGER NOT NULL DEFAULT 20,
         notification_id TEXT,
@@ -56,12 +59,62 @@ class DatabaseService {
         dose_mcg REAL NOT NULL,
         dose_iu REAL NOT NULL,
         notes TEXT,
+        injection_site TEXT,
+        FOREIGN KEY (device_id) REFERENCES devices(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE protocols (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        start_date TEXT NOT NULL,
+        end_date TEXT,
+        notes TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE protocol_devices (
+        protocol_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        PRIMARY KEY (protocol_id, device_id),
+        FOREIGN KEY (protocol_id) REFERENCES protocols(id),
         FOREIGN KEY (device_id) REFERENCES devices(id)
       )
     ''');
 
     await db.execute('CREATE INDEX idx_logs_device ON dose_logs(device_id)');
     await db.execute('CREATE INDEX idx_logs_date ON dose_logs(logged_at)');
+  }
+
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('ALTER TABLE dose_logs ADD COLUMN injection_site TEXT');
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE devices ADD COLUMN schedule_days TEXT');
+    }
+    if (oldVersion < 4) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS protocols (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          start_date TEXT NOT NULL,
+          end_date TEXT,
+          notes TEXT
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS protocol_devices (
+          protocol_id TEXT NOT NULL,
+          device_id TEXT NOT NULL,
+          PRIMARY KEY (protocol_id, device_id),
+          FOREIGN KEY (protocol_id) REFERENCES protocols(id),
+          FOREIGN KEY (device_id) REFERENCES devices(id)
+        )
+      ''');
+    }
   }
 
   // ── Devices ──────────────────────────────────────────────────
@@ -75,6 +128,16 @@ class DatabaseService {
     final rows = await db.query(
       'devices',
       where: 'nfc_tag_id = ? AND active = 1',
+      whereArgs: [nfcTagId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : Device.fromMap(rows.first);
+  }
+
+  Future<Device?> getConflictingDeviceByNfcTagId(String nfcTagId) async {
+    final rows = await db.query(
+      'devices',
+      where: 'nfc_tag_id = ? AND active = 1 AND remaining_doses > 0',
       whereArgs: [nfcTagId],
       limit: 1,
     );
@@ -99,7 +162,7 @@ class DatabaseService {
   }
 
   Future<void> deactivateDevice(String deviceId) async {
-    await db.update('devices', {'active': 0}, where: 'id = ?', whereArgs: [deviceId]);
+    await db.update('devices', {'active': 0, 'remaining_doses': 0}, where: 'id = ?', whereArgs: [deviceId]);
   }
 
   Future<void> deleteAllDevices() async => db.delete('devices');
@@ -125,9 +188,60 @@ class DatabaseService {
     await db.insert('dose_logs', log.toMap());
   }
 
+  Future<void> updateDoseLog(DoseLog log) async {
+    await db.update('dose_logs', log.toMap(), where: 'id = ?', whereArgs: [log.id]);
+  }
+
+  Future<void> deleteDoseLog(String logId) async {
+    await db.delete('dose_logs', where: 'id = ?', whereArgs: [logId]);
+  }
+
   Future<void> deleteAllLogs() async => db.delete('dose_logs');
 
+  // ── Protocols ─────────────────────────────────────────────────
+
+  Future<List<Protocol>> getAllProtocols() async {
+    final rows = await db.query('protocols', orderBy: 'start_date DESC');
+    return rows.map(Protocol.fromMap).toList();
+  }
+
+  Future<void> insertProtocol(Protocol protocol) async {
+    await db.insert('protocols', protocol.toMap());
+  }
+
+  Future<void> updateProtocol(Protocol protocol) async {
+    await db.update('protocols', protocol.toMap(), where: 'id = ?', whereArgs: [protocol.id]);
+  }
+
+  Future<void> deleteProtocol(String protocolId) async {
+    await db.delete('protocol_devices', where: 'protocol_id = ?', whereArgs: [protocolId]);
+    await db.delete('protocols', where: 'id = ?', whereArgs: [protocolId]);
+  }
+
+  Future<Map<String, String>> getDeviceProtocolMap() async {
+    final rows = await db.query('protocol_devices');
+    return {for (final r in rows) r['device_id'] as String: r['protocol_id'] as String};
+  }
+
+  Future<void> setDevicesForProtocol(String protocolId, List<String> deviceIds) async {
+    await db.delete('protocol_devices', where: 'protocol_id = ?', whereArgs: [protocolId]);
+    for (final deviceId in deviceIds) {
+      await db.insert('protocol_devices', {
+        'protocol_id': protocolId,
+        'device_id': deviceId,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+  }
+
+  Future<void> removeDeviceFromAllProtocols(String deviceId) async {
+    await db.delete('protocol_devices', where: 'device_id = ?', whereArgs: [deviceId]);
+  }
+
+  // ── Clear all ─────────────────────────────────────────────────
+
   Future<void> clearAllData() async {
+    await db.delete('protocol_devices');
+    await db.delete('protocols');
     await db.delete('dose_logs');
     await db.delete('devices');
   }

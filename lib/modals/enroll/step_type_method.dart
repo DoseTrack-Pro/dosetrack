@@ -5,9 +5,18 @@ import '../../theme/app_theme.dart';
 class StepTypeMethod extends StatefulWidget {
   final ContainerType initialType;
   final bool initialUseNfc;
+  final List<Device> previousDevices;
   final void Function(ContainerType type, bool useNfc) onNext;
+  final void Function(Device device) onCopyPrevious;
 
-  const StepTypeMethod({super.key, required this.initialType, required this.initialUseNfc, required this.onNext});
+  const StepTypeMethod({
+    super.key,
+    required this.initialType,
+    required this.initialUseNfc,
+    required this.onNext,
+    required this.onCopyPrevious,
+    this.previousDevices = const [],
+  });
 
   @override
   State<StepTypeMethod> createState() => _StepTypeMethodState();
@@ -29,27 +38,27 @@ class _StepTypeMethodState extends State<StepTypeMethod> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Container Type', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        Text('Compound Type', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: context.clrText)),
         const SizedBox(height: 4),
-        const Text('What are you enrolling?', style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
+        Text('What are you enrolling?', style: TextStyle(fontSize: 14, color: context.clrTextSub)),
         const SizedBox(height: 16),
 
         Row(children: [
           Expanded(child: _TypeCard(label: 'Injectable Pen', tag: 'PEN',
-              tagBg: AppColors.purpleLight, tagFg: AppColors.purpleDark,
+              tagBg: context.clrPurpleBg, tagFg: AppColors.purpleDark,
               selected: _type == ContainerType.pen,
               onTap: () => setState(() => _type = ContainerType.pen))),
           const SizedBox(width: 12),
           Expanded(child: _TypeCard(label: 'Vial', tag: 'VIAL',
-              tagBg: AppColors.tealLight, tagFg: AppColors.tealDark,
+              tagBg: context.clrTealBg, tagFg: AppColors.tealDark,
               selected: _type == ContainerType.vial,
               onTap: () => setState(() => _type = ContainerType.vial))),
         ]),
         const SizedBox(height: 28),
 
-        const Text('Tracking Method', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+        Text('Tracking Method', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: context.clrText)),
         const SizedBox(height: 4),
-        const Text('How will you identify this container?', style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
+        Text('How will you identify this compound?', style: TextStyle(fontSize: 14, color: context.clrTextSub)),
         const SizedBox(height: 16),
 
         Row(children: [
@@ -69,6 +78,41 @@ class _StepTypeMethodState extends State<StepTypeMethod> {
             child: const Text('Continue'),
           ),
         ),
+
+        // Re-enroll previous
+        if (widget.previousDevices.isNotEmpty) ...[
+          const SizedBox(height: 28),
+          Text('RE-ENROLL PREVIOUS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
+              color: context.clrTextSub, letterSpacing: 0.6)),
+          const SizedBox(height: 8),
+          ...widget.previousDevices.take(5).map((d) => GestureDetector(
+            onTap: () => widget.onCopyPrevious(d),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: context.clrBg,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: context.clrBorder, width: 0.5),
+              ),
+              child: Row(children: [
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(d.name, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
+                        color: context.clrText), maxLines: 1, overflow: TextOverflow.ellipsis),
+                    Text('${d.vendor}  ·  ${d.desiredDoseMcg.toStringAsFixed(0)}mcg  ·  ${d.schedule.label}',
+                        style: TextStyle(fontSize: 12, color: context.clrTextSub),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
+                )),
+                const SizedBox(width: 8),
+                const Text('Copy →', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.teal)),
+              ]),
+            ),
+          )),
+        ],
       ],
     );
   }
@@ -87,9 +131,9 @@ class _TypeCard extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: selected ? AppColors.tealLight : AppColors.background,
+        color: selected ? context.clrTealBg : context.clrBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: selected ? AppColors.teal : AppColors.border, width: selected ? 2 : 0.5),
+        border: Border.all(color: selected ? AppColors.teal : context.clrBorder, width: selected ? 2 : 0.5),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -97,7 +141,7 @@ class _TypeCard extends StatelessWidget {
             child: Text(tag, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: tagFg))),
         const SizedBox(height: 8),
         Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
-            color: selected ? AppColors.tealDark : AppColors.textPrimary)),
+            color: selected ? AppColors.tealDark : context.clrText)),
       ]),
     ),
   );
@@ -115,9 +159,9 @@ class _MethodCard extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: selected ? AppColors.tealLight : AppColors.background,
+        color: selected ? context.clrTealBg : context.clrBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: selected ? AppColors.teal : AppColors.border, width: selected ? 2 : 0.5),
+        border: Border.all(color: selected ? AppColors.teal : context.clrBorder, width: selected ? 2 : 0.5),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         if (recommended) ...[
@@ -127,9 +171,9 @@ class _MethodCard extends StatelessWidget {
           const SizedBox(height: 6),
         ],
         Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
-            color: selected ? AppColors.tealDark : AppColors.textPrimary)),
+            color: selected ? AppColors.tealDark : context.clrText)),
         const SizedBox(height: 3),
-        Text(subtitle, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary, height: 1.3)),
+        Text(subtitle, style: TextStyle(fontSize: 12, color: context.clrTextSub, height: 1.3)),
       ]),
     ),
   );

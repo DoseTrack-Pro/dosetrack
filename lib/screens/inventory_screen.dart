@@ -10,7 +10,7 @@ import '../modals/device_detail_modal.dart';
 import '../modals/log_dose_modal.dart';
 import '../modals/nfc_scan_modal.dart';
 
-enum _Filter { all, active, depleted, pen, vial }
+enum _Filter { all, active, depleted, archived, pen, vial }
 
 class InventoryScreen extends ConsumerStatefulWidget {
   const InventoryScreen({super.key});
@@ -27,25 +27,35 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
 
     final filtered = devices.where((d) {
       switch (_filter) {
-        case _Filter.active:   return d.active;
-        case _Filter.depleted: return !d.active || d.remainingDoses == 0;
+        case _Filter.active:   return d.active && d.remainingDoses > 0;
+        case _Filter.depleted: return d.active && d.remainingDoses == 0;
+        case _Filter.archived: return !d.active;
         case _Filter.pen:      return d.type == ContainerType.pen;
         case _Filter.vial:     return d.type == ContainerType.vial;
         case _Filter.all:      return true;
       }
     }).toList();
 
+    final filterLabels = {
+      _Filter.all: 'All',
+      _Filter.active: 'Active',
+      _Filter.depleted: 'Depleted',
+      _Filter.archived: 'Archived',
+      _Filter.pen: 'Pen',
+      _Filter.vial: 'Vial',
+    };
+
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.clrBg,
       body: SafeArea(
         child: Column(
           children: [
             Container(
-              color: AppColors.surface,
+              color: context.clrSurface,
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
               child: Row(
                 children: [
-                  const Expanded(child: Text('Inventory', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: AppColors.textPrimary))),
+                  Expanded(child: Text('Inventory', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: context.clrText))),
                   TextButton(
                     onPressed: () => showModalBottomSheet(
                       context: context, isScrollControlled: true, useSafeArea: true,
@@ -59,14 +69,13 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
             ),
             // Filter chips
             Container(
-              color: AppColors.surface,
+              color: context.clrSurface,
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                 child: Row(
                   children: _Filter.values.map((f) {
                     final active = _filter == f;
-                    final label = f.name[0].toUpperCase() + f.name.substring(1);
                     return Padding(
                       padding: const EdgeInsets.only(right: 8),
                       child: GestureDetector(
@@ -74,11 +83,14 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                           decoration: BoxDecoration(
-                            color: active ? AppColors.tealLight : Colors.transparent,
+                            color: active ? context.clrTealBg : Colors.transparent,
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: active ? AppColors.teal : AppColors.border, width: active ? 1 : 0.5),
+                            border: Border.all(color: active ? AppColors.teal : context.clrBorder, width: active ? 1 : 0.5),
                           ),
-                          child: Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: active ? AppColors.tealDark : AppColors.textSecondary)),
+                          child: Text(filterLabels[f]!, style: TextStyle(
+                            fontSize: 13, fontWeight: FontWeight.w500,
+                            color: active ? AppColors.tealDark : context.clrTextSub,
+                          )),
                         ),
                       ),
                     );
@@ -88,7 +100,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
             ),
             Expanded(
               child: filtered.isEmpty
-                  ? const EmptyState(title: 'No containers', subtitle: 'Enroll a pen or vial to get started')
+                  ? EmptyState(title: 'No compounds', subtitle: 'Enroll a pen or vial to get started', icon: Icons.inventory_2_outlined)
                   : ListView.builder(
                       padding: const EdgeInsets.all(20),
                       itemCount: filtered.length,
@@ -140,9 +152,9 @@ class _DeviceRow extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(
-          color: AppColors.surface,
+          color: context.clrSurface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.border, width: 0.5),
+          border: Border.all(color: context.clrBorder, width: 0.5),
         ),
         padding: const EdgeInsets.all(14),
         child: Row(
@@ -150,7 +162,7 @@ class _DeviceRow extends StatelessWidget {
             Container(
               width: 48, height: 48,
               decoration: BoxDecoration(
-                color: device.type == ContainerType.pen ? AppColors.purpleLight : AppColors.tealLight,
+                color: device.type == ContainerType.pen ? context.clrPurpleBg : context.clrTealBg,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Center(child: Text(
@@ -165,25 +177,25 @@ class _DeviceRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
-                    Flexible(child: Text(device.name, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary), overflow: TextOverflow.ellipsis)),
+                    Flexible(child: Text(device.name, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: context.clrText), overflow: TextOverflow.ellipsis)),
                     const SizedBox(width: 6),
-                    if (device.nfcTagId != null) const BadgeChip(label: 'NFC', bg: AppColors.blueLight, fg: AppColors.blueDark),
+                    if (device.nfcTagId != null) BadgeChip(label: 'NFC', bg: context.clrBlueBg, fg: AppColors.blueDark),
                     if (!device.active) const SizedBox(width: 4),
-                    if (!device.active) const BadgeChip(label: 'Archived', bg: AppColors.border, fg: AppColors.textSecondary),
+                    if (!device.active) BadgeChip(label: 'Archived', bg: AppColors.border, fg: AppColors.textSecondary),
                   ]),
                   const SizedBox(height: 3),
-                  Text('${device.vendor} · ${device.reconstitutionDate}', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                  Text('${device.vendor} · ${device.reconstitutionDate}', style: TextStyle(fontSize: 12, color: context.clrTextSub)),
                   const SizedBox(height: 6),
                   ClipRRect(
                     borderRadius: BorderRadius.circular(2),
-                    child: LinearProgressIndicator(value: pct, backgroundColor: AppColors.border, valueColor: AlwaysStoppedAnimation(color), minHeight: 3),
+                    child: LinearProgressIndicator(value: pct, backgroundColor: context.clrBorder, valueColor: AlwaysStoppedAnimation(color), minHeight: 3),
                   ),
                   const SizedBox(height: 3),
-                  Text('${device.remainingDoses}/${device.totalDoses} doses · ${(pct * 100).round()}%', style: const TextStyle(fontSize: 11, color: AppColors.textTertiary)),
+                  Text('${device.remainingDoses}/${device.totalDoses} doses · ${(pct * 100).round()}%', style: TextStyle(fontSize: 11, color: context.clrTextHint)),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right_rounded, color: AppColors.textTertiary, size: 18),
+            Icon(Icons.chevron_right_rounded, color: context.clrTextHint, size: 18),
           ],
         ),
       ),

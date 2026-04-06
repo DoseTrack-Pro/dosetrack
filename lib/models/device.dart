@@ -17,7 +17,7 @@ extension DoseScheduleLabel on DoseSchedule {
       case DoseSchedule.everyOtherDay: return 'Every Other Day';
       case DoseSchedule.twiceWeekly:  return 'Twice a Week';
       case DoseSchedule.onceWeekly:   return 'Once a Week';
-      case DoseSchedule.custom:       return 'Custom';
+      case DoseSchedule.custom:       return 'Custom Days';
     }
   }
 
@@ -55,6 +55,9 @@ class Device {
   final int totalDoses;
   final int remainingDoses;
   final DoseSchedule schedule;
+  /// Specific weekdays for twiceWeekly, onceWeekly, or custom schedules.
+  /// Integers 1–7 where 1 = Monday, 7 = Sunday (Dart's DateTime.weekday).
+  final List<int>? scheduleDays;
   final String? nfcTagId;
   final int alertThresholdPct;
   final String? notificationId;
@@ -76,6 +79,7 @@ class Device {
     required this.totalDoses,
     required this.remainingDoses,
     required this.schedule,
+    this.scheduleDays,
     this.nfcTagId,
     required this.alertThresholdPct,
     this.notificationId,
@@ -90,7 +94,8 @@ class Device {
     String? batchNumber, String? coaUrl, String? reconstitutionDate,
     double? peptideMg, double? reconVolumeMl, double? desiredDoseMcg,
     double? doseVolumeIu, int? totalDoses, int? remainingDoses,
-    DoseSchedule? schedule, String? nfcTagId, int? alertThresholdPct,
+    DoseSchedule? schedule, List<int>? scheduleDays, bool clearScheduleDays = false,
+    String? nfcTagId, int? alertThresholdPct,
     String? notificationId, bool? active, DateTime? createdAt,
   }) {
     return Device(
@@ -108,6 +113,7 @@ class Device {
       totalDoses: totalDoses ?? this.totalDoses,
       remainingDoses: remainingDoses ?? this.remainingDoses,
       schedule: schedule ?? this.schedule,
+      scheduleDays: clearScheduleDays ? null : (scheduleDays ?? this.scheduleDays),
       nfcTagId: nfcTagId ?? this.nfcTagId,
       alertThresholdPct: alertThresholdPct ?? this.alertThresholdPct,
       notificationId: notificationId ?? this.notificationId,
@@ -131,6 +137,7 @@ class Device {
     'total_doses': totalDoses,
     'remaining_doses': remainingDoses,
     'schedule': schedule.value,
+    'schedule_days': scheduleDays?.join(','),
     'nfc_tag_id': nfcTagId,
     'alert_threshold_pct': alertThresholdPct,
     'notification_id': notificationId,
@@ -153,6 +160,11 @@ class Device {
     totalDoses: m['total_doses'] as int,
     remainingDoses: m['remaining_doses'] as int,
     schedule: DoseScheduleLabel.fromValue(m['schedule'] as String),
+    scheduleDays: (m['schedule_days'] as String?)
+        ?.split(',')
+        .where((s) => s.isNotEmpty)
+        .map(int.parse)
+        .toList(),
     nfcTagId: m['nfc_tag_id'] as String?,
     alertThresholdPct: m['alert_threshold_pct'] as int,
     notificationId: m['notification_id'] as String?,

@@ -19,13 +19,13 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
   int _step = 0;
   bool _loading = false;
 
-  // Accumulated form data
   ContainerType _type = ContainerType.pen;
   bool _useNfc = true;
   String? _nfcTagId;
   String _name = '', _vendor = '', _batchNumber = '', _coaUrl = '', _reconDate = '';
   double _peptideMg = 0, _reconMl = 0, _desiredMcg = 0;
   DoseSchedule _schedule = DoseSchedule.dailyAm;
+  List<int>? _scheduleDays;
   int _alertPct = 20;
 
   bool get _isNfcFlow => _useNfc;
@@ -53,6 +53,7 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
         reconstitutionDate: _reconDate,
         peptideMg: _peptideMg, reconVolumeMl: _reconMl,
         desiredDoseMcg: _desiredMcg, schedule: _schedule,
+        scheduleDays: _scheduleDays,
         alertThresholdPct: _alertPct,
         nfcTagId: _nfcTagId,
       );
@@ -72,18 +73,17 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
   Widget build(BuildContext context) {
     return Container(
       height: MediaQuery.of(context).size.height * 0.92,
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      decoration: BoxDecoration(
+        color: context.clrSurface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         children: [
-          // Handle + header
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
             child: Column(children: [
               Center(child: Container(width: 36, height: 4,
-                  decoration: BoxDecoration(color: AppColors.borderStrong, borderRadius: BorderRadius.circular(2)))),
+                  decoration: BoxDecoration(color: context.clrBorderStrong, borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 14),
               Row(children: [
                 GestureDetector(
@@ -91,19 +91,18 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
                   child: Text(_step == 0 ? 'Cancel' : '← Back',
                       style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: AppColors.teal)),
                 ),
-                const Expanded(child: Center(child: Text('Enroll Container',
-                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)))),
+                Expanded(child: Center(child: Text('Enroll Compound',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: context.clrText)))),
                 const SizedBox(width: 60),
               ]),
               const SizedBox(height: 14),
-              // Progress bar
               Row(
                 children: List.generate(_totalSteps, (i) => Expanded(
                   child: Container(
                     height: 3,
                     margin: EdgeInsets.only(right: i < _totalSteps - 1 ? 5 : 0),
                     decoration: BoxDecoration(
-                      color: i <= _displayStep ? AppColors.teal : AppColors.border,
+                      color: i <= _displayStep ? AppColors.teal : context.clrBorder,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -113,7 +112,6 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
           ),
           const SizedBox(height: 4),
 
-          // Step content
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
@@ -130,6 +128,19 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
       return StepTypeMethod(
         initialType: _type,
         initialUseNfc: _useNfc,
+        previousDevices: ref.watch(devicesProvider),
+        onCopyPrevious: (d) => setState(() {
+          _type = d.type;
+          _name = d.name;
+          _vendor = d.vendor;
+          _peptideMg = d.peptideMg;
+          _reconMl = d.reconVolumeMl;
+          _desiredMcg = d.desiredDoseMcg;
+          _schedule = d.schedule;
+          _scheduleDays = d.scheduleDays != null ? List<int>.from(d.scheduleDays!) : null;
+          _alertPct = d.alertThresholdPct;
+          _step = 2;
+        }),
         onNext: (type, useNfc) {
           setState(() { _type = type; _useNfc = useNfc; });
           if (!useNfc) { setState(() => _step = 2); } else { _next(); }
@@ -156,8 +167,17 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
     }
 
     return StepDosingConfig(
-      onFinish: (mg, ml, mcg, schedule, alertPct) {
-        setState(() { _peptideMg = mg; _reconMl = ml; _desiredMcg = mcg; _schedule = schedule; _alertPct = alertPct; });
+      initialMg: _peptideMg,
+      initialMl: _reconMl,
+      initialMcg: _desiredMcg,
+      initialSchedule: _schedule,
+      initialScheduleDays: _scheduleDays,
+      initialAlertPct: _alertPct,
+      onFinish: (mg, ml, mcg, schedule, scheduleDays, alertPct) {
+        setState(() {
+          _peptideMg = mg; _reconMl = ml; _desiredMcg = mcg;
+          _schedule = schedule; _scheduleDays = scheduleDays; _alertPct = alertPct;
+        });
         _finish();
       },
       loading: _loading,

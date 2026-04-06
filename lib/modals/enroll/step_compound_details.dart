@@ -18,7 +18,8 @@ class StepCompoundDetails extends StatefulWidget {
 }
 
 class _StepCompoundDetailsState extends State<StepCompoundDetails> {
-  late TextEditingController _name, _vendor, _batch, _coa, _date;
+  late TextEditingController _name, _vendor, _batch, _coa;
+  late DateTime _reconDate;
   final _formKey = GlobalKey<FormState>();
 
   @override
@@ -28,20 +29,36 @@ class _StepCompoundDetailsState extends State<StepCompoundDetails> {
     _vendor = TextEditingController(text: widget.initialVendor);
     _batch  = TextEditingController(text: widget.initialBatch);
     _coa    = TextEditingController(text: widget.initialCoa);
-    _date   = TextEditingController(
-      text: widget.initialDate.isEmpty ? DateFormat('yyyy-MM-dd').format(DateTime.now()) : widget.initialDate,
-    );
+    final parsed = DateTime.tryParse(widget.initialDate);
+    _reconDate = parsed ?? DateTime.now();
   }
 
   @override
   void dispose() {
-    for (final c in [_name, _vendor, _batch, _coa, _date]) { c.dispose(); }
+    for (final c in [_name, _vendor, _batch, _coa]) { c.dispose(); }
     super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _reconDate,
+      firstDate: DateTime.now().subtract(const Duration(days: 90)),
+      lastDate: DateTime.now(),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: Theme.of(context).colorScheme.copyWith(primary: AppColors.teal),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) setState(() => _reconDate = picked);
   }
 
   void _submit() {
     if (_formKey.currentState!.validate()) {
-      widget.onNext(_name.text.trim(), _vendor.text.trim(), _batch.text.trim(), _coa.text.trim(), _date.text.trim());
+      final dateStr = DateFormat('yyyy-MM-dd').format(_reconDate);
+      widget.onNext(_name.text.trim(), _vendor.text.trim(), _batch.text.trim(), _coa.text.trim(), dateStr);
     }
   }
 
@@ -52,9 +69,9 @@ class _StepCompoundDetailsState extends State<StepCompoundDetails> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Compound Details', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          Text('Compound Details', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: context.clrText)),
           const SizedBox(height: 4),
-          const Text('Enter information from the product label', style: TextStyle(fontSize: 14, color: AppColors.textSecondary)),
+          Text('Enter information from the product label', style: TextStyle(fontSize: 14, color: context.clrTextSub)),
           const SizedBox(height: 24),
 
           _Field(label: 'Compound name *', controller: _name, hint: 'e.g. BPC-157',
@@ -68,8 +85,35 @@ class _StepCompoundDetailsState extends State<StepCompoundDetails> {
               textCapitalization: TextCapitalization.characters),
           _Field(label: 'COA URL', controller: _coa, hint: 'https://',
               keyboardType: TextInputType.url),
-          _Field(label: 'Reconstitution date *', controller: _date, hint: 'YYYY-MM-DD',
-              validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null),
+
+          // ── Date picker row ──────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.only(bottom: 14),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Reconstitution date *',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.clrTextSub, letterSpacing: 0.2)),
+              const SizedBox(height: 6),
+              GestureDetector(
+                onTap: _pickDate,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                  decoration: BoxDecoration(
+                    color: context.clrSurface,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: context.clrBorder),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.calendar_today_rounded, size: 16, color: AppColors.teal),
+                    const SizedBox(width: 10),
+                    Text(DateFormat('MMMM d, yyyy').format(_reconDate),
+                        style: TextStyle(fontSize: 15, color: context.clrText)),
+                    const Spacer(),
+                    Icon(Icons.chevron_right_rounded, size: 18, color: context.clrTextHint),
+                  ]),
+                ),
+              ),
+            ]),
+          ),
 
           const SizedBox(height: 24),
           SizedBox(width: double.infinity,
@@ -95,14 +139,14 @@ class _Field extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 14),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textSecondary, letterSpacing: 0.2)),
+      Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.clrTextSub, letterSpacing: 0.2)),
       const SizedBox(height: 6),
       TextFormField(
         controller: controller,
         validator: validator,
         keyboardType: keyboardType,
         textCapitalization: textCapitalization,
-        style: const TextStyle(fontSize: 15, color: AppColors.textPrimary),
+        style: TextStyle(fontSize: 15, color: context.clrText),
         decoration: InputDecoration(hintText: hint),
       ),
     ]),

@@ -1,3 +1,12 @@
+const kInjectionSites = [
+  'Left Abdomen',
+  'Right Abdomen',
+  'Left Thigh',
+  'Right Thigh',
+  'Left Deltoid',
+  'Right Deltoid',
+];
+
 enum LogMethod { nfc, manual }
 
 class DoseLog {
@@ -8,6 +17,7 @@ class DoseLog {
   final double doseMcg;
   final double doseIu;
   final String? notes;
+  final String? injectionSite;
 
   const DoseLog({
     required this.id,
@@ -17,6 +27,7 @@ class DoseLog {
     required this.doseMcg,
     required this.doseIu,
     this.notes,
+    this.injectionSite,
   });
 
   Map<String, dynamic> toMap() => {
@@ -27,6 +38,7 @@ class DoseLog {
     'dose_mcg': doseMcg,
     'dose_iu': doseIu,
     'notes': notes,
+    'injection_site': injectionSite,
   };
 
   factory DoseLog.fromMap(Map<String, dynamic> m) => DoseLog(
@@ -37,5 +49,6 @@ class DoseLog {
     doseMcg: (m['dose_mcg'] as num).toDouble(),
     doseIu: (m['dose_iu'] as num).toDouble(),
     notes: m['notes'] as String?,
+    injectionSite: m['injection_site'] as String?,
   );
 }

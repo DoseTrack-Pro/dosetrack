@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/device.dart';
 import '../providers/app_state.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dose_ring.dart';
-import '../widgets/badge_chip.dart';
 import '../utils/calculations.dart';
+import 'edit_device_modal.dart';
 
 class DeviceDetailPage extends ConsumerWidget {
   final Device device;
@@ -35,32 +36,49 @@ class DeviceDetailPage extends ConsumerWidget {
     final pct = liveDevice.remainingPct;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: context.clrBg,
       body: SafeArea(
         child: Column(
           children: [
             // Header
             Container(
-              color: AppColors.surface,
+              color: context.clrSurface,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
                   IconButton(
                     icon: const Icon(Icons.arrow_back_rounded),
                     onPressed: () => Navigator.pop(context),
-                    color: AppColors.textPrimary,
+                    color: context.clrText,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                   ),
                   const SizedBox(width: 10),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(liveDevice.name, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                    Text('${liveDevice.vendor} · ${liveDevice.batchNumber}', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                    Text(liveDevice.name, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: context.clrText)),
+                    Text('${liveDevice.vendor} · ${liveDevice.batchNumber}', style: TextStyle(fontSize: 12, color: context.clrTextSub)),
                   ])),
+                  // F2: Edit button
                   TextButton(
-                    onPressed: () => _archive(context, ref),
-                    child: const Text('Archive', style: TextStyle(color: AppColors.red, fontWeight: FontWeight.w600)),
+                    onPressed: () => Navigator.push(context, MaterialPageRoute(
+                      builder: (_) => EditDevicePage(device: liveDevice),
+                    )),
+                    child: const Text('Edit', style: TextStyle(color: AppColors.teal, fontWeight: FontWeight.w600)),
                   ),
+                  if (!liveDevice.active)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Text('Archived', style: TextStyle(fontSize: 13, color: context.clrTextHint, fontWeight: FontWeight.w600)),
+                    )
+                  else
+                    TextButton(
+                      onPressed: () => _archive(context, ref),
+                      child: Text(
+                        liveDevice.type == ContainerType.pen ? 'Archive Pen' : 'Archive Vial',
+                        style: const TextStyle(color: AppColors.red, fontWeight: FontWeight.w600),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -70,7 +88,7 @@ class DeviceDetailPage extends ConsumerWidget {
                 children: [
                   // Ring
                   Container(
-                    color: AppColors.surface,
+                    color: context.clrSurface,
                     padding: const EdgeInsets.symmetric(vertical: 28),
                     child: Column(children: [
                       DoseRing(remaining: liveDevice.remainingDoses, total: liveDevice.totalDoses, size: 140, strokeWidth: 10),
@@ -79,12 +97,12 @@ class DeviceDetailPage extends ConsumerWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
                           decoration: BoxDecoration(
-                            color: AppColors.border,
+                            color: context.clrBorder,
                             borderRadius: BorderRadius.circular(20),
                           ),
-                          child: const Text('Depleted',
+                          child: Text('Depleted',
                             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600,
-                              color: AppColors.textTertiary, letterSpacing: 0.3)),
+                              color: context.clrTextHint, letterSpacing: 0.3)),
                         )
                       else
                         Text('${(pct * 100).round()}% remaining',
@@ -108,7 +126,7 @@ class DeviceDetailPage extends ConsumerWidget {
                         ]),
                         const SizedBox(height: 8),
                         Row(children: [
-                          Expanded(child: _InfoTile('Dose vol', '${liveDevice.doseVolumeIu.toStringAsFixed(0)} IU')),
+                          Expanded(child: _InfoTile('Dose vol', '${liveDevice.doseVolumeIu.toStringAsFixed(1)} IU')),
                           const SizedBox(width: 8),
                           Expanded(child: _InfoTile('Total', '${liveDevice.totalDoses} doses')),
                           const SizedBox(width: 8),
@@ -124,21 +142,22 @@ class DeviceDetailPage extends ConsumerWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 20),
                     child: Container(
                       decoration: BoxDecoration(
-                        color: AppColors.surface,
+                        color: context.clrSurface,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.border, width: 0.5),
+                        border: Border.all(color: context.clrBorder, width: 0.5),
                       ),
                       child: Column(children: [
                         _MetaRow('Type', liveDevice.type == ContainerType.pen ? 'Injectable Pen' : 'Vial'),
-                        const Divider(height: 0),
+                        Divider(height: 0, color: context.clrBorder),
                         _MetaRow('NFC tag', liveDevice.nfcTagId != null ? 'Enrolled' : 'Not enrolled'),
-                        const Divider(height: 0),
+                        Divider(height: 0, color: context.clrBorder),
                         _MetaRow('Reconstituted', liveDevice.reconstitutionDate),
-                        const Divider(height: 0),
+                        Divider(height: 0, color: context.clrBorder),
                         _MetaRow('Alert at', '${liveDevice.alertThresholdPct}% remaining'),
-                        if (liveDevice.coaUrl != null) ...[
-                          const Divider(height: 0),
-                          _MetaRow('COA', liveDevice.coaUrl!),
+                        // F3: COA URL tappable
+                        if (liveDevice.coaUrl != null && liveDevice.coaUrl!.isNotEmpty) ...[
+                          Divider(height: 0, color: context.clrBorder),
+                          _CoaRow(url: liveDevice.coaUrl!),
                         ],
                       ]),
                     ),
@@ -147,17 +166,17 @@ class DeviceDetailPage extends ConsumerWidget {
 
                   // Recent doses
                   if (logs.isNotEmpty) ...[
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
-                      child: Text('Recent doses', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                      child: Text('Recent doses', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: context.clrText)),
                     ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 20),
                       child: Container(
                         decoration: BoxDecoration(
-                          color: AppColors.surface,
+                          color: context.clrSurface,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppColors.border, width: 0.5),
+                          border: Border.all(color: context.clrBorder, width: 0.5),
                         ),
                         child: Column(
                           children: logs.indexed.map((entry) {
@@ -169,20 +188,20 @@ class DeviceDetailPage extends ConsumerWidget {
                                 child: Row(children: [
                                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                                     Text('${formatLogDate(log.loggedAt)}  ·  ${formatLogTime(log.loggedAt)}',
-                                        style: const TextStyle(fontSize: 13, color: AppColors.textPrimary)),
+                                        style: TextStyle(fontSize: 13, color: context.clrText)),
                                     Text(log.method.name == 'nfc' ? 'NFC' : 'Manual',
-                                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                                        style: TextStyle(fontSize: 12, color: context.clrTextSub)),
                                   ])),
                                   Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
                                     Text('${log.doseMcg.toStringAsFixed(0)}mcg',
-                                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
-                                            color: AppColors.textPrimary, fontFamily: 'Courier New')),
-                                    Text('${log.doseIu.toStringAsFixed(0)}IU',
-                                        style: const TextStyle(fontSize: 11, color: AppColors.textSecondary, fontFamily: 'Courier New')),
+                                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
+                                            color: context.clrText, fontFamily: 'Courier New')),
+                                    Text('${log.doseIu.toStringAsFixed(1)}IU',
+                                        style: TextStyle(fontSize: 11, color: context.clrTextSub, fontFamily: 'Courier New')),
                                   ]),
                                 ]),
                               ),
-                              if (i < logs.length - 1) const Divider(height: 0, indent: 16),
+                              if (i < logs.length - 1) Divider(height: 0, indent: 16, color: context.clrBorder),
                             ]);
                           }).toList(),
                         ),
@@ -199,9 +218,9 @@ class DeviceDetailPage extends ConsumerWidget {
 
       // Bottom action bar
       bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: AppColors.surface,
-          border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
+        decoration: BoxDecoration(
+          color: context.clrSurface,
+          border: Border(top: BorderSide(color: context.clrBorder, width: 0.5)),
         ),
         padding: EdgeInsets.fromLTRB(20, 12, 20, MediaQuery.of(context).padding.bottom + 12),
         child: liveDevice.remainingDoses <= 0
@@ -210,21 +229,23 @@ class DeviceDetailPage extends ConsumerWidget {
                   onPressed: () => Navigator.pop(context),
                   child: const Text('Close'),
                 )),
-                const SizedBox(width: 10),
-                Expanded(child: ElevatedButton(
-                  onPressed: () => _archive(context, ref),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.red,
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('Archive Container'),
-                )),
+                if (liveDevice.active) ...[
+                  const SizedBox(width: 10),
+                  Expanded(child: ElevatedButton(
+                    onPressed: () => _archive(context, ref),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.red,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: Text(liveDevice.type == ContainerType.pen ? 'Archive Pen' : 'Archive Vial'),
+                  )),
+                ],
               ])
             : Row(children: [
                 if (liveDevice.nfcTagId != null) ...[
                   Expanded(child: ElevatedButton(
                     onPressed: () { Navigator.pop(context); onLogNfc(); },
-                    style: ElevatedButton.styleFrom(backgroundColor: color),
+                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.teal),
                     child: const Text('Log via NFC'),
                   )),
                   const SizedBox(width: 10),
@@ -235,7 +256,7 @@ class DeviceDetailPage extends ConsumerWidget {
                 ] else
                   Expanded(child: ElevatedButton(
                     onPressed: () { Navigator.pop(context); onLogManual(); },
-                    style: ElevatedButton.styleFrom(backgroundColor: color),
+                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.teal),
                     child: const Text('Log Dose'),
                   )),
               ]),
@@ -247,8 +268,10 @@ class DeviceDetailPage extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Archive Container'),
-        content: Text('Archive ${device.name}? This will mark it as depleted and cancel reminders.'),
+        backgroundColor: context.clrSurface,
+        title: Text('Archive Compound', style: TextStyle(color: context.clrText)),
+        content: Text('Archive ${device.name}? This will mark it as depleted and cancel reminders.',
+            style: TextStyle(color: context.clrTextSub)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
           TextButton(
@@ -266,6 +289,37 @@ class DeviceDetailPage extends ConsumerWidget {
   }
 }
 
+class _CoaRow extends StatelessWidget {
+  final String url;
+  const _CoaRow({required this.url});
+
+  Future<void> _open() async {
+    final uri = Uri.tryParse(url);
+    if (uri != null && await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: _open,
+    borderRadius: const BorderRadius.only(
+      bottomLeft: Radius.circular(12), bottomRight: Radius.circular(12),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+      child: Row(children: [
+        Expanded(child: Text('COA', style: TextStyle(fontSize: 13, color: context.clrTextSub))),
+        Flexible(child: Text(url,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.blue),
+          textAlign: TextAlign.right, maxLines: 1, overflow: TextOverflow.ellipsis)),
+        const SizedBox(width: 4),
+        const Icon(Icons.open_in_new_rounded, size: 14, color: AppColors.blue),
+      ]),
+    ),
+  );
+}
+
 class _InfoTile extends StatelessWidget {
   final String label;
   final String value;
@@ -275,22 +329,22 @@ class _InfoTile extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
     decoration: BoxDecoration(
-      color: AppColors.surface,
+      color: context.clrSurface,
       borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: AppColors.border, width: 0.5),
+      border: Border.all(color: context.clrBorder, width: 0.5),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+        Text(label, style: TextStyle(fontSize: 10, color: context.clrTextSub),
           maxLines: 1, overflow: TextOverflow.ellipsis),
         const SizedBox(height: 4),
         FittedBox(
           fit: BoxFit.scaleDown,
           alignment: Alignment.centerLeft,
-          child: Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary, fontFamily: 'Courier New')),
+          child: Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+            color: context.clrText, fontFamily: 'Courier New')),
         ),
       ],
     ),
@@ -306,8 +360,9 @@ class _MetaRow extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
     child: Row(children: [
-      Expanded(child: Text(label, style: const TextStyle(fontSize: 13, color: AppColors.textSecondary))),
-      Flexible(child: Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary), textAlign: TextAlign.right, maxLines: 1, overflow: TextOverflow.ellipsis)),
+      Expanded(child: Text(label, style: TextStyle(fontSize: 13, color: context.clrTextSub))),
+      Flexible(child: Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.clrText),
+          textAlign: TextAlign.right, maxLines: 1, overflow: TextOverflow.ellipsis)),
     ]),
   );
 }

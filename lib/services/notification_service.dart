@@ -16,8 +16,7 @@ class NotificationService {
   Future<void> init() async {
     tz.initializeTimeZones();
 
-    const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
@@ -25,22 +24,22 @@ class NotificationService {
     );
 
     await _plugin.initialize(
-      const InitializationSettings(
-        android: androidSettings,
-        iOS: iosSettings,
-      ),
+      const InitializationSettings(android: androidSettings, iOS: iosSettings),
     );
 
     if (Platform.isAndroid) {
-      await _plugin
-          .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(const AndroidNotificationChannel(
-            'dose_reminders',
-            'Dose Reminders',
-            description: 'Reminds you when a peptide dose is due',
-            importance: Importance.high,
-          ));
+      final android = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await android?.createNotificationChannel(const AndroidNotificationChannel(
+        'dose_reminders', 'Dose Reminders',
+        description: 'Reminds you when a peptide dose is due',
+        importance: Importance.high,
+      ));
+      await android?.createNotificationChannel(const AndroidNotificationChannel(
+        'alerts', 'Alerts',
+        description: 'Low stock, depletion, and missed dose alerts',
+        importance: Importance.defaultImportance,
+      ));
     }
 
     _initialized = true;
@@ -50,34 +49,33 @@ class NotificationService {
     if (!_initialized) return false;
     if (Platform.isIOS) {
       final result = await _plugin
-          .resolvePlatformSpecificImplementation<
-              IOSFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
           ?.requestPermissions(alert: true, badge: true, sound: true);
       return result ?? false;
     }
     if (Platform.isAndroid) {
       final result = await _plugin
-          .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
           ?.requestNotificationsPermission();
       return result ?? false;
     }
     return false;
   }
 
-  NotificationDetails get _details => const NotificationDetails(
-        android: AndroidNotificationDetails(
-          'dose_reminders',
-          'Dose Reminders',
-          importance: Importance.high,
-          priority: Priority.high,
-        ),
-        iOS: DarwinNotificationDetails(),
-      );
+  NotificationDetails get _reminderDetails => const NotificationDetails(
+    android: AndroidNotificationDetails('dose_reminders', 'Dose Reminders',
+        importance: Importance.high, priority: Priority.high),
+    iOS: DarwinNotificationDetails(),
+  );
+
+  NotificationDetails get _alertDetails => const NotificationDetails(
+    android: AndroidNotificationDetails('alerts', 'Alerts',
+        importance: Importance.defaultImportance, priority: Priority.defaultPriority),
+    iOS: DarwinNotificationDetails(),
+  );
 
   Future<String?> scheduleDoseReminder(Device device) async {
     if (!_initialized) return null;
-
     final hour = scheduleHour(device.schedule);
     final id = device.id.hashCode.abs() % 100000;
 
@@ -89,33 +87,29 @@ class NotificationService {
             id,
             'Time for your ${device.name} dose',
             '${device.desiredDoseMcg.toStringAsFixed(0)}mcg'
-                ' (${device.doseVolumeIu.toStringAsFixed(0)} IU)'
-                ' — open PeptideTrack to log',
+                ' (${device.doseVolumeIu.toStringAsFixed(1)} IU) — open PeptideTrack to log',
             _nextInstance(hour, 0),
-            _details,
+            _reminderDetails,
             androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
             uiLocalNotificationDateInterpretation:
                 UILocalNotificationDateInterpretation.absoluteTime,
             matchDateTimeComponents: DateTimeComponents.time,
           );
           break;
-
         case DoseSchedule.onceWeekly:
         case DoseSchedule.twiceWeekly:
           await _plugin.zonedSchedule(
             id,
             'Time for your ${device.name} dose',
-            '${device.desiredDoseMcg.toStringAsFixed(0)}mcg'
-                ' — open PeptideTrack to log',
+            '${device.desiredDoseMcg.toStringAsFixed(0)}mcg — open PeptideTrack to log',
             _nextInstance(hour, 0),
-            _details,
+            _reminderDetails,
             androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
             uiLocalNotificationDateInterpretation:
                 UILocalNotificationDateInterpretation.absoluteTime,
             matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
           );
           break;
-
         default:
           break;
       }
@@ -123,7 +117,6 @@ class NotificationService {
       debugPrint('Notification scheduling failed: $e');
       return null;
     }
-
     return id.toString();
   }
 
@@ -141,16 +134,36 @@ class NotificationService {
     await _plugin.show(
       id,
       '${device.name} is running low',
-      'Only ${device.remainingDoses} dose'
-          '${device.remainingDoses != 1 ? "s" : ""} remaining',
-      _details,
+      'Only ${device.remainingDoses} dose${device.remainingDoses != 1 ? "s" : ""} remaining',
+      _alertDetails,
+    );
+  }
+
+  Future<void> showDepletionAlert(Device device) async {
+    if (!_initialized) return;
+    final id = (device.id.hashCode.abs() + 60000) % 100000;
+    await _plugin.show(
+      id,
+      '${device.name} is depleted',
+      'All doses used. Time to reorder and reconstitute.',
+      _alertDetails,
+    );
+  }
+
+  Future<void> showMissedDoseAlert(Device device) async {
+    if (!_initialized) return;
+    final id = (device.id.hashCode.abs() + 70000) % 100000;
+    await _plugin.show(
+      id,
+      'Missed dose: ${device.name}',
+      'You didn\'t log a dose yesterday. Check your schedule.',
+      _alertDetails,
     );
   }
 
   tz.TZDateTime _nextInstance(int hour, int minute) {
     final now = tz.TZDateTime.now(tz.local);
-    var scheduled =
-        tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
+    var scheduled = tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
     if (scheduled.isBefore(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }

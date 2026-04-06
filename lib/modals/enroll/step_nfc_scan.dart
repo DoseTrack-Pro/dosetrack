@@ -1,10 +1,15 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import '../../models/device.dart';
 import '../../services/nfc_service.dart';
+import '../../services/database_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/dose_ring.dart';
+import '../../widgets/badge_chip.dart';
 
-enum _Phase { scanning, success, timeout, error }
+// Added 'duplicate' phase for NFC tag already in use by an active container
+enum _Phase { scanning, success, timeout, error, duplicate }
 
 class StepNfcScan extends StatefulWidget {
   final void Function(String tagId) onTagWritten;
@@ -22,7 +27,7 @@ class StepNfcScan extends StatefulWidget {
 
 class _StepNfcScanState extends State<StepNfcScan>
     with SingleTickerProviderStateMixin {
-  static const _totalSeconds = 10;
+  static const _totalSeconds = 20;
 
   _Phase _phase = _Phase.scanning;
   String _error = '';
@@ -30,7 +35,9 @@ class _StepNfcScanState extends State<StepNfcScan>
   int _countdown = _totalSeconds;
   Timer? _countdownTimer;
 
-  // Pulse animation for the rings
+  // Set when the scanned tag conflicts with an existing active container
+  Device? _conflictDevice;
+
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulse;
 
@@ -42,8 +49,6 @@ class _StepNfcScanState extends State<StepNfcScan>
       duration: const Duration(milliseconds: 1800),
     )..repeat();
     _pulse = CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeOut);
-
-    // Auto-start scanning immediately when the step appears
     WidgetsBinding.instance.addPostFrameCallback((_) => _startScan());
   }
 
@@ -55,18 +60,19 @@ class _StepNfcScanState extends State<StepNfcScan>
     super.dispose();
   }
 
+  // ── Countdown ─────────────────────────────────────────────────
+
   void _startCountdown() {
     _countdownTimer?.cancel();
     setState(() => _countdown = _totalSeconds);
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) { t.cancel(); return; }
       setState(() => _countdown--);
-      if (_countdown <= 0) {
-        t.cancel();
-        // NFC poll will timeout naturally — we just mirror the count visually
-      }
+      if (_countdown <= 0) t.cancel();
     });
   }
+
+  // ── Scan & validate ───────────────────────────────────────────
 
   Future<void> _startScan() async {
     _countdownTimer?.cancel();
@@ -74,6 +80,7 @@ class _StepNfcScanState extends State<StepNfcScan>
       _phase = _Phase.scanning;
       _error = '';
       _scannedUid = null;
+      _conflictDevice = null;
       _countdown = _totalSeconds;
     });
     _startCountdown();
@@ -88,11 +95,32 @@ class _StepNfcScanState extends State<StepNfcScan>
       if (!mounted) return;
 
       if (uid == null || uid.isEmpty) {
-        setState(() { _phase = _Phase.timeout; });
+        setState(() => _phase = _Phase.timeout);
         return;
       }
 
-      setState(() { _phase = _Phase.success; _scannedUid = uid; });
+      // ── Uniqueness check ─────────────────────────────────────
+      // Look for any active, non-depleted container already using this tag.
+      final conflict = await DatabaseService.instance
+          .getConflictingDeviceByNfcTagId(uid);
+
+      if (!mounted) return;
+
+      if (conflict != null) {
+        // Tag is in use — show the duplicate state
+        setState(() {
+          _phase = _Phase.duplicate;
+          _scannedUid = uid;
+          _conflictDevice = conflict;
+        });
+        return;
+      }
+
+      // Tag is free — proceed
+      setState(() {
+        _phase = _Phase.success;
+        _scannedUid = uid;
+      });
       await Future.delayed(const Duration(milliseconds: 900));
       if (mounted) widget.onTagWritten(uid);
     } catch (e) {
@@ -101,7 +129,6 @@ class _StepNfcScanState extends State<StepNfcScan>
 
       final msg = e.toString().toLowerCase();
       if (msg.contains('cancel') || msg.contains('user')) {
-        // User tapped cancel — show timeout screen so they can retry or skip
         setState(() => _phase = _Phase.timeout);
       } else if (msg.contains('timeout')) {
         setState(() => _phase = _Phase.timeout);
@@ -120,69 +147,56 @@ class _StepNfcScanState extends State<StepNfcScan>
     return AppColors.red;
   }
 
+  // ── Build ─────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         // Title
         Text(
-          _phase == _Phase.success ? 'Tag Detected!'
-              : _phase == _Phase.timeout ? 'No Tag Detected'
-              : _phase == _Phase.error ? 'Scan Failed'
-              : 'Scan NFC Tag',
-          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary),
+          _phaseTitle,
+          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: context.clrText),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 8),
-        Text(
-          _phase == _Phase.scanning
-              ? 'Hold any NFC tag flat against the\ntop-back of your phone'
-              : _phase == _Phase.success
-              ? 'Tag registered successfully'
-              : _phase == _Phase.timeout
-              ? 'No tag was found in time.\nMake sure NFC is enabled and try again.'
-              : _error,
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 14, color: AppColors.textSecondary,
-              height: 1.5),
-        ),
-        const SizedBox(height: 32),
 
-        // ── Main visual ──────────────────────────────────────
+        // Subtitle — hide for duplicate (card below carries the message)
+        if (_phase != _Phase.duplicate)
+          Text(
+            _phaseSubtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: context.clrTextSub, height: 1.5),
+          ),
+
+        const SizedBox(height: 28),
+
+        // ── Visual ─────────────────────────────────────────────
         SizedBox(
           width: 200, height: 200,
           child: Stack(
             alignment: Alignment.center,
             children: [
-
-              // Countdown arc (scanning phase only)
               if (_phase == _Phase.scanning)
                 CustomPaint(
                   size: const Size(200, 200),
                   painter: _CountdownArcPainter(
                     progress: _countdown / _totalSeconds,
                     color: _timerColor,
+                    borderColor: context.clrBorder,
                   ),
                 ),
-
-              // Pulsing rings (scanning phase only)
               if (_phase == _Phase.scanning) ...[
                 AnimatedBuilder(animation: _pulse, builder: (_, __) =>
                     _PulseRing(progress: _pulse.value, size: 148)),
                 AnimatedBuilder(animation: _pulse, builder: (_, __) =>
                     _PulseRing(progress: (_pulse.value + 0.45) % 1.0, size: 112)),
               ],
-
-              // Centre circle
               AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
                 width: 78, height: 78,
                 decoration: BoxDecoration(
-                  color: _phase == _Phase.success ? AppColors.tealLight
-                      : _phase == _Phase.timeout ? AppColors.amberLight
-                      : _phase == _Phase.error ? AppColors.redLight
-                      : AppColors.teal,
+                  color: _centerColor(context),
                   shape: BoxShape.circle,
                 ),
                 child: Center(child: _centerContent()),
@@ -190,20 +204,22 @@ class _StepNfcScanState extends State<StepNfcScan>
             ],
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
 
-        // UID display on success
+        // ── Duplicate conflict card ─────────────────────────────
+        if (_phase == _Phase.duplicate && _conflictDevice != null)
+          _DuplicateCard(device: _conflictDevice!),
+
+        // UID on success
         if (_phase == _Phase.success && _scannedUid != null)
           Text('UID: $_scannedUid',
-            style: const TextStyle(fontSize: 11, color: AppColors.textTertiary,
-                fontFamily: 'Courier New')),
+            style: TextStyle(fontSize: 11, color: context.clrTextHint, fontFamily: 'Courier New')),
 
-        const SizedBox(height: 28),
+        const SizedBox(height: 24),
 
-        // ── Action buttons ───────────────────────────────────
+        // ── Action buttons ──────────────────────────────────────
         if (_phase == _Phase.scanning)
-          SizedBox(
-            width: double.infinity,
+          SizedBox(width: double.infinity,
             child: OutlinedButton(
               onPressed: () {
                 NfcService.instance.cancel();
@@ -215,16 +231,25 @@ class _StepNfcScanState extends State<StepNfcScan>
           ),
 
         if (_phase == _Phase.timeout || _phase == _Phase.error) ...[
-          SizedBox(
-            width: double.infinity,
+          SizedBox(width: double.infinity,
+            child: ElevatedButton(onPressed: _startScan,
+                child: const Text('Try Again'))),
+          const SizedBox(height: 10),
+          SizedBox(width: double.infinity,
+            child: OutlinedButton(onPressed: widget.onSkip,
+                child: const Text('Use manual tracking instead'))),
+        ],
+
+        if (_phase == _Phase.duplicate) ...[
+          // Offer to scan a different tag
+          SizedBox(width: double.infinity,
             child: ElevatedButton(
               onPressed: _startScan,
-              child: const Text('Try Again'),
+              child: const Text('Scan a Different Tag'),
             ),
           ),
           const SizedBox(height: 10),
-          SizedBox(
-            width: double.infinity,
+          SizedBox(width: double.infinity,
             child: OutlinedButton(
               onPressed: widget.onSkip,
               child: const Text('Use manual tracking instead'),
@@ -235,36 +260,159 @@ class _StepNfcScanState extends State<StepNfcScan>
     );
   }
 
+  // ── Helpers ───────────────────────────────────────────────────
+
+  String get _phaseTitle {
+    switch (_phase) {
+      case _Phase.scanning:   return 'Scan NFC Tag';
+      case _Phase.success:    return 'Tag Detected!';
+      case _Phase.timeout:    return 'No Tag Detected';
+      case _Phase.error:      return 'Scan Failed';
+      case _Phase.duplicate:  return 'Tag Already In Use';
+    }
+  }
+
+  String get _phaseSubtitle {
+    switch (_phase) {
+      case _Phase.scanning:
+        return 'Hold any NFC tag flat against the\ntop-back of your phone';
+      case _Phase.success:
+        return 'Tag registered successfully';
+      case _Phase.timeout:
+        return 'No tag was found in time.\nMake sure NFC is enabled and try again.';
+      case _Phase.error:
+        return _error;
+      case _Phase.duplicate:
+        return ''; // handled by _DuplicateCard
+    }
+  }
+
+  Color _centerColor(BuildContext context) {
+    switch (_phase) {
+      case _Phase.scanning:  return AppColors.teal;
+      case _Phase.success:   return context.clrTealBg;
+      case _Phase.timeout:   return context.clrAmberBg;
+      case _Phase.error:     return context.clrRedBg;
+      case _Phase.duplicate: return context.clrAmberBg;
+    }
+  }
+
   Widget _centerContent() {
     switch (_phase) {
       case _Phase.scanning:
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '$_countdown',
-              style: TextStyle(
-                fontSize: 26, fontWeight: FontWeight.w700,
-                color: Colors.white, fontFamily: 'Courier New',
-              ),
-            ),
-            const Text('sec', style: TextStyle(fontSize: 11,
-                color: Colors.white70)),
-          ],
-        );
+        return Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('$_countdown', style: const TextStyle(fontSize: 26,
+              fontWeight: FontWeight.w700, color: Colors.white,
+              fontFamily: 'Courier New')),
+          const Text('sec', style: TextStyle(fontSize: 11, color: Colors.white70)),
+        ]);
       case _Phase.success:
         return const Icon(Icons.check_rounded, color: AppColors.teal, size: 40);
       case _Phase.timeout:
-        return const Icon(Icons.timer_off_rounded,
-            color: AppColors.amber, size: 36);
+        return const Icon(Icons.timer_off_rounded, color: AppColors.amber, size: 36);
       case _Phase.error:
-        return const Icon(Icons.error_outline_rounded,
-            color: AppColors.red, size: 36);
+        return const Icon(Icons.error_outline_rounded, color: AppColors.red, size: 36);
+      case _Phase.duplicate:
+        return const Icon(Icons.link_rounded, color: AppColors.amber, size: 36);
     }
   }
 }
 
+// ── Duplicate conflict card ────────────────────────────────────
+
+class _DuplicateCard extends StatelessWidget {
+  final Device device;
+  const _DuplicateCard({required this.device});
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = device.remainingPct;
+    final color = doseColor(device.remainingDoses, device.totalDoses);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 4),
+      decoration: BoxDecoration(
+        color: context.clrAmberBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.amber, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Warning header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: Row(children: [
+              const Icon(Icons.warning_amber_rounded, color: AppColors.amber, size: 18),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'This tag is linked to an active compound',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.amberDark),
+                ),
+              ),
+            ]),
+          ),
+
+          // Device summary row
+          Container(
+            margin: const EdgeInsets.fromLTRB(10, 0, 10, 12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: context.clrSurface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: context.clrBorder, width: 0.5),
+            ),
+            child: Row(children: [
+              DoseRing(remaining: device.remainingDoses,
+                  total: device.totalDoses, size: 54, strokeWidth: 4),
+              const SizedBox(width: 12),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Flexible(child: Text(device.name,
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: context.clrText),
+                        maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    const SizedBox(width: 6),
+                    BadgeChip(
+                      label: device.type.name.toUpperCase(),
+                      bg: device.type == ContainerType.pen ? context.clrPurpleBg : context.clrTealBg,
+                      fg: device.type == ContainerType.pen ? AppColors.purpleDark : AppColors.tealDark,
+                    ),
+                  ]),
+                  const SizedBox(height: 3),
+                  Text(device.vendor,
+                      style: TextStyle(fontSize: 12, color: context.clrTextSub),
+                      maxLines: 1, overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${device.remainingDoses} of ${device.totalDoses} doses remaining  (${(pct * 100).round()}%)',
+                    style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              )),
+            ]),
+          ),
+
+          // Explanation
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+            child: Text(
+              'You can reuse this tag once "${device.name}" is fully depleted. '
+              'Scan a different tag, or choose manual tracking.',
+              style: const TextStyle(fontSize: 12, color: AppColors.amberDark, height: 1.45),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Pulsing ring ───────────────────────────────────────────────
+
 class _PulseRing extends StatelessWidget {
   final double progress;
   final double size;
@@ -287,23 +435,23 @@ class _PulseRing extends StatelessWidget {
 }
 
 // ── Countdown arc painter ──────────────────────────────────────
+
 class _CountdownArcPainter extends CustomPainter {
-  final double progress; // 1.0 = full, 0.0 = empty
+  final double progress;
   final Color color;
-  const _CountdownArcPainter({required this.progress, required this.color});
+  final Color borderColor;
+  const _CountdownArcPainter({required this.progress, required this.color, required this.borderColor});
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = Offset(size.width / 2, size.height / 2);
     final radius = size.shortestSide / 2 - 5;
 
-    // Track
     canvas.drawCircle(center, radius, Paint()
-      ..color = AppColors.border
+      ..color = borderColor
       ..strokeWidth = 6
       ..style = PaintingStyle.stroke);
 
-    // Arc — drains clockwise from top
     if (progress > 0) {
       canvas.drawArc(
         Rect.fromCircle(center: center, radius: radius),
@@ -321,5 +469,5 @@ class _CountdownArcPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_CountdownArcPainter old) =>
-      progress != old.progress || color != old.color;
+      progress != old.progress || color != old.color || borderColor != old.borderColor;
 }
