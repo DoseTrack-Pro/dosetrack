@@ -15,6 +15,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
   DateTime? _backgroundedAt;
   bool _locked = false;
   bool _unlocking = false;
+  bool _ignoreNextResumeLock = false;
 
   final _pinCtrl = TextEditingController();
   String? _pinError;
@@ -55,11 +56,20 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
+      // On Android, local_auth can temporarily move the app through lifecycle
+      // states while the biometric prompt is visible. Don't treat that as a
+      // true background event that should relock the app.
+      if (_unlocking) return;
       _backgroundedAt = DateTime.now();
       return;
     }
 
     if (state == AppLifecycleState.resumed) {
+      if (_ignoreNextResumeLock) {
+        _ignoreNextResumeLock = false;
+        _backgroundedAt = null;
+        return;
+      }
       final bgAt = _backgroundedAt;
       if (bgAt == null) return;
       _backgroundedAt = null;
@@ -86,6 +96,7 @@ class _AppLockGateState extends State<AppLockGate> with WidgetsBindingObserver {
     final canUse = await AppLockService.instance.supportsBiometrics();
     if (!canUse || !_locked || !mounted) return;
 
+    _ignoreNextResumeLock = true;
     _unlocking = true;
     final ok = await AppLockService.instance.authenticateBiometric();
     _unlocking = false;
