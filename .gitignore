@@ -1,53 +1,60 @@
-# Flutter/Dart
+# Flutter / Dart
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
 .packages
+.pub/
+.pub-cache/
 build/
-*.lock
+coverage/
 
-# Android
+# Android (local and secret files)
 android/.gradle/
 android/local.properties
 android/key.properties
 android/app/google-services.json
+android/app/src/debug/google-services.json
+android/app/src/profile/google-services.json
+android/app/src/release/google-services.json
+*.jks
+*.keystore
 
-# iOS
+# iOS / CocoaPods generated
 ios/.symlinks/
+ios/Pods/
 ios/Flutter/App.framework
 ios/Flutter/Flutter.framework
 ios/Flutter/Flutter.podspec
 ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
 ios/Flutter/ephemeral/
 ios/Flutter/app.flx
 ios/Flutter/app.zip
 ios/Flutter/flutter_assets/
 ios/ServiceDefinitions.json
 ios/Runner/GeneratedPluginRegistrant.*
-ios/Pods/
 
-# macOS
-macos/Flutter/GeneratedPluginRegistrant.swift
+# Desktop generated
 macos/Flutter/ephemeral/
-
-# Windows
+macos/Flutter/GeneratedPluginRegistrant.swift
+linux/flutter/generated_plugin_registrant.*
 windows/flutter/generated_plugin_registrant.cc
 windows/flutter/generated_plugin_registrant.h
 windows/flutter/generated_plugins.cmake
 
-# IDE
+# IDE / Editor
 .idea/
 .vscode/
 *.iml
 
-# Misc
+# OS / Misc
+.DS_Store
+Thumbs.db
 *.class
 *.log
 *.pyc
 *.swp
-.DS_Store
 .atom/
 .buildlog/
 .history
 .svn/
-pubspec.lock
