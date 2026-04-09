@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/device.dart';
 import '../theme/app_theme.dart';
 import '../utils/calculations.dart';
+import 'animated_progress_bar.dart';
+import 'pressable_scale.dart';
 import 'dose_ring.dart';
 import 'badge_chip.dart';
 
@@ -26,35 +28,55 @@ class DeviceCard extends StatelessWidget {
   static List<Widget> _expiryBadge(Device device) {
     final days = daysUntilExpiry(device);
     if (days > 7) return [];
-    if (days < 0) return [const BadgeChip(label: 'EXPIRED', bg: AppColors.redLight, fg: AppColors.redDark)];
-    return [BadgeChip(label: '${days}D LEFT', bg: AppColors.amberLight, fg: AppColors.amberDark)];
+    if (days < 0) {
+      return [
+        const BadgeChip(
+            label: 'EXPIRED', bg: AppColors.redLight, fg: AppColors.redDark)
+      ];
+    }
+    return [
+      BadgeChip(
+          label: '${days}D LEFT',
+          bg: AppColors.amberLight,
+          fg: AppColors.amberDark)
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
     final depleted = device.remainingDoses <= 0;
-    final ringColor = depleted ? AppColors.textTertiary : doseColor(device.remainingDoses, device.totalDoses);
-    final pct = device.totalDoses > 0 ? device.remainingDoses / device.totalDoses : 0.0;
+    final ringColor = depleted
+        ? AppColors.textTertiary
+        : doseColor(device.remainingDoses, device.totalDoses);
+    final pct =
+        device.totalDoses > 0 ? device.remainingDoses / device.totalDoses : 0.0;
 
     // Log button is always teal when active; gray when depleted
     final logBtnColor = depleted ? context.clrBorder : AppColors.teal;
-    final logBtnTextColor = depleted ? context.clrTextHint : AppColors.textInverse;
+    final logBtnTextColor =
+        depleted ? context.clrTextHint : AppColors.textInverse;
 
-    return GestureDetector(
+    return PressableScale(
       onTap: onTap,
       child: Container(
-        margin: showBorder ? const EdgeInsets.only(bottom: 10) : EdgeInsets.zero,
+        margin:
+            showBorder ? const EdgeInsets.only(bottom: 10) : EdgeInsets.zero,
         decoration: BoxDecoration(
           color: context.clrSurface,
           borderRadius: borderRadius ?? BorderRadius.circular(14),
-          border: showBorder ? Border.all(color: context.clrBorder, width: 0.5) : null,
+          border: showBorder
+              ? Border.all(color: context.clrBorder, width: 0.5)
+              : null,
         ),
         padding: const EdgeInsets.all(14),
         child: Column(
           children: [
             Row(
               children: [
-                DoseRing(remaining: device.remainingDoses, total: device.totalDoses, size: 70),
+                DoseRing(
+                    remaining: device.remainingDoses,
+                    total: device.totalDoses,
+                    size: 70),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -64,27 +86,50 @@ class DeviceCard extends StatelessWidget {
                         spacing: 5,
                         runSpacing: 4,
                         children: [
-                          Text(device.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: context.clrText)),
+                          Text(device.name,
+                              style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                  color: context.clrText)),
                           BadgeChip(
                             label: device.type.name.toUpperCase(),
-                            bg: device.type == ContainerType.pen ? context.clrPurpleBg : context.clrTealBg,
-                            fg: device.type == ContainerType.pen ? AppColors.purpleDark : AppColors.tealDark,
+                            bg: device.type == ContainerType.pen
+                                ? context.clrPurpleBg
+                                : context.clrTealBg,
+                            fg: device.type == ContainerType.pen
+                                ? AppColors.purpleDark
+                                : AppColors.tealDark,
                           ),
                           if (device.nfcTagId != null)
-                            BadgeChip(label: 'NFC', bg: context.clrBlueBg, fg: AppColors.blueDark),
+                            BadgeChip(
+                                label: 'NFC',
+                                bg: context.clrBlueBg,
+                                fg: AppColors.blueDark),
                           if (device.active) ..._expiryBadge(device),
                           // "Dosed today" indicator
                           if (dosedToday && !depleted)
-                            const BadgeChip(label: '✓ DOSED', bg: AppColors.tealLight, fg: AppColors.tealDark),
+                            const BadgeChip(
+                                label: '✓ DOSED',
+                                bg: AppColors.tealLight,
+                                fg: AppColors.tealDark),
                         ],
                       ),
                       const SizedBox(height: 3),
-                      Text(device.vendor, style: TextStyle(fontSize: 12, color: context.clrTextSub), maxLines: 1, overflow: TextOverflow.ellipsis),
+                      Text(device.vendor,
+                          style: TextStyle(
+                              fontSize: 12, color: context.clrTextSub),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis),
                       const SizedBox(height: 2),
                       Text(
                         '${device.schedule.label}  ·  ${device.desiredDoseMcg.toStringAsFixed(0)}mcg / ${device.doseVolumeIu.toStringAsFixed(1)}IU',
-                        style: TextStyle(fontSize: 12, color: context.clrTextSub, fontFamily: 'Courier New'),
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: context.clrTextSub,
+                            fontFamily: 'Inter',
+                            fontFeatures: const [FontFeature.tabularFigures()]),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
@@ -93,28 +138,29 @@ class DeviceCard extends StatelessWidget {
                 GestureDetector(
                   onTap: depleted ? null : onLogTap,
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                     decoration: BoxDecoration(
                       color: logBtnColor,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       depleted ? 'Empty' : (dosedToday ? 'Log +' : 'Log'),
-                      style: TextStyle(color: logBtnTextColor, fontSize: 13, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                          color: logBtnTextColor,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600),
                     ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(2),
-              child: LinearProgressIndicator(
-                value: pct,
-                backgroundColor: context.clrBorder,
-                valueColor: AlwaysStoppedAnimation<Color>(ringColor),
-                minHeight: 3,
-              ),
+            AnimatedProgressBar(
+              value: pct,
+              backgroundColor: context.clrBorder,
+              valueColor: ringColor,
+              minHeight: 3,
             ),
             const SizedBox(height: 4),
             Row(

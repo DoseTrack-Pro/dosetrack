@@ -22,7 +22,7 @@
     </queries>
 
     <application
-        android:label="PeptideTrack"
+        android:label="Pep Tracker Pro"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:enableOnBackInvokedCallback="true">

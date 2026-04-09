@@ -48,9 +48,9 @@ class ExportService {
     }
 
     final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/PeptideTrack_$stamp.csv');
+    final file = File('${dir.path}/PepTrackerPro_$stamp.csv');
     await file.writeAsString(buf.toString());
-    await Share.shareXFiles([XFile(file.path)], text: 'PeptideTrack data export');
+    await Share.shareXFiles([XFile(file.path)], text: 'Pep Tracker Pro data export');
   }
 
   String _esc(String s) {
@@ -76,7 +76,7 @@ class ExportService {
       margin: const pw.EdgeInsets.all(40),
       build: (ctx) => [
         // Header
-        pw.Text('PeptideTrack Report',
+        pw.Text('Pep Tracker Pro Report',
           style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold, color: teal)),
         pw.SizedBox(height: 6),
         pw.Text('Generated $dateStr · ${devices.length} compounds · ${logs.length} dose logs',
@@ -190,8 +190,8 @@ class ExportService {
     ));
 
     final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/PeptideTrack_$stamp.pdf');
+    final file = File('${dir.path}/PepTrackerPro_$stamp.pdf');
     await file.writeAsBytes(await pdf.save());
-    await Share.shareXFiles([XFile(file.path)], text: 'PeptideTrack report');
+    await Share.shareXFiles([XFile(file.path)], text: 'Pep Tracker Pro report');
   }
 }

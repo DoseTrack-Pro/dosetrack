@@ -63,7 +63,8 @@ class AppNotifier extends Notifier<AppState> {
     final devices = await DatabaseService.instance.getAllDevices();
     final logs = await DatabaseService.instance.getAllDoseLogs();
     final protocols = await DatabaseService.instance.getAllProtocols();
-    final deviceProtocols = await DatabaseService.instance.getDeviceProtocolMap();
+    final deviceProtocols =
+        await DatabaseService.instance.getDeviceProtocolMap();
     state = state.copyWith(
       devices: devices,
       doseLogs: logs,
@@ -71,24 +72,37 @@ class AppNotifier extends Notifier<AppState> {
       deviceProtocols: deviceProtocols,
     );
 
+    // Reconcile reminder schedule on launch/refresh to keep schedules trustworthy.
+    await refreshDoseReminders();
+
     if (SettingsService.instance.missedDoseAlerts) {
-      _checkMissedDoses(devices, logs);
+      await _checkMissedDoses(devices, logs);
     }
   }
 
-  void _checkMissedDoses(List<Device> devices, List<DoseLog> logs) {
+  Future<void> _checkMissedDoses(
+      List<Device> devices, List<DoseLog> logs) async {
     final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    final dayKey = formatDate(yesterday);
     for (final device in devices) {
       if (!device.active || device.remainingDoses <= 0) continue;
       if (!isScheduledOnDate(device, yesterday)) continue;
-      final hadLog = logs.any((l) =>
-        l.deviceId == device.id &&
-        l.loggedAt.year == yesterday.year &&
-        l.loggedAt.month == yesterday.month &&
-        l.loggedAt.day == yesterday.day,
+      final hadLog = logs.any(
+        (l) =>
+            l.deviceId == device.id &&
+            l.loggedAt.year == yesterday.year &&
+            l.loggedAt.month == yesterday.month &&
+            l.loggedAt.day == yesterday.day,
       );
       if (!hadLog) {
-        NotificationService.instance.showMissedDoseAlert(device).catchError((_) {});
+        final lastAlerted =
+            SettingsService.instance.lastMissedAlertDate(device.id);
+        if (lastAlerted == dayKey) continue;
+        NotificationService.instance
+            .showMissedDoseAlert(device)
+            .catchError((_) {});
+        await SettingsService.instance
+            .setLastMissedAlertDate(device.id, dayKey);
       }
     }
   }
@@ -105,14 +119,25 @@ class AppNotifier extends Notifier<AppState> {
     required double peptideMg,
     required double reconVolumeMl,
     required double desiredDoseMcg,
+    bool isBlend = false,
+    List<BlendComponent>? blendComponents,
     required DoseSchedule schedule,
+    String? scheduleStartDate,
     List<int>? scheduleDays,
     required int alertThresholdPct,
+    int? startingRemainingDoses,
+    int expiryDays = 30,
     String? nfcTagId,
   }) async {
     final doseVolumeIu = calcDoseIu(peptideMg, reconVolumeMl, desiredDoseMcg);
     final totalDoses = calcTotalDoses(reconVolumeMl, doseVolumeIu);
+    final seededRemaining = startingRemainingDoses ?? totalDoses;
+    final remainingDoses =
+        totalDoses > 0 ? seededRemaining.clamp(1, totalDoses).toInt() : 0;
     final id = _uuid.v4();
+    final normalizedStartDate = scheduleStartDate?.trim().isNotEmpty == true
+        ? scheduleStartDate!.trim()
+        : formatDate(DateTime.now());
 
     var device = Device(
       id: id,
@@ -127,19 +152,28 @@ class AppNotifier extends Notifier<AppState> {
       desiredDoseMcg: desiredDoseMcg,
       doseVolumeIu: doseVolumeIu,
       totalDoses: totalDoses,
-      remainingDoses: totalDoses,
+      remainingDoses: remainingDoses,
+      isBlend: isBlend,
+      blendComponents: blendComponents,
       schedule: schedule,
+      scheduleStartDate: normalizedStartDate,
       scheduleDays: scheduleDays,
+      expiryDays: expiryDays,
       nfcTagId: nfcTagId,
       alertThresholdPct: alertThresholdPct,
       active: true,
       createdAt: DateTime.now(),
     );
 
-    try {
-      final notifId = await NotificationService.instance.scheduleDoseReminder(device);
-      if (notifId != null) device = device.copyWith(notificationId: notifId);
-    } catch (_) {}
+    if (SettingsService.instance.doseReminders) {
+      try {
+        final notifId =
+            await NotificationService.instance.scheduleDoseReminder(device);
+        if (notifId != null) device = device.copyWith(notificationId: notifId);
+      } catch (_) {}
+    } else {
+      device = device.copyWith(clearNotificationId: true);
+    }
 
     await DatabaseService.instance.insertDevice(device);
     state = state.copyWith(devices: [device, ...state.devices]);
@@ -184,11 +218,40 @@ class AppNotifier extends Notifier<AppState> {
     );
 
     final pct = (newRemaining / device.totalDoses) * 100;
-    if (pct <= device.alertThresholdPct && pct > 0 && SettingsService.instance.lowInventoryAlerts) {
-      try { await NotificationService.instance.showLowStockAlert(updatedDevice); } catch (_) {}
+    if (pct <= device.alertThresholdPct &&
+        pct > 0 &&
+        SettingsService.instance.lowInventoryAlerts) {
+      try {
+        await NotificationService.instance.showLowStockAlert(updatedDevice);
+      } catch (_) {}
     }
     if (newRemaining == 0) {
-      try { await NotificationService.instance.showDepletionAlert(updatedDevice); } catch (_) {}
+      try {
+        await NotificationService.instance.showDepletionAlert(updatedDevice);
+      } catch (_) {}
+    }
+
+    if (SettingsService.instance.doseReminders &&
+        device.schedule == DoseSchedule.everyOtherDay) {
+      if (device.notificationId != null) {
+        try {
+          await NotificationService.instance
+              .cancelReminder(device.notificationId!);
+        } catch (_) {}
+      }
+      try {
+        final notifId = await NotificationService.instance
+            .scheduleDoseReminder(updatedDevice);
+        if (notifId != null) {
+          final withNotif = updatedDevice.copyWith(notificationId: notifId);
+          await DatabaseService.instance.updateDevice(withNotif);
+          state = state.copyWith(
+            devices: state.devices
+                .map((d) => d.id == deviceId ? withNotif : d)
+                .toList(),
+          );
+        }
+      } catch (_) {}
     }
 
     showToast('${device.name} dose logged');
@@ -214,9 +277,11 @@ class AppNotifier extends Notifier<AppState> {
     List<Device> updatedDevices = state.devices;
     if (device != null) {
       final newRemaining = device.remainingDoses + 1;
-      await DatabaseService.instance.updateRemainingDoses(device.id, newRemaining);
+      await DatabaseService.instance
+          .updateRemainingDoses(device.id, newRemaining);
       updatedDevices = state.devices
-          .map((d) => d.id == device.id ? d.copyWith(remainingDoses: newRemaining) : d)
+          .map((d) =>
+              d.id == device.id ? d.copyWith(remainingDoses: newRemaining) : d)
           .toList();
     }
 
@@ -233,18 +298,29 @@ class AppNotifier extends Notifier<AppState> {
 
     final old = state.devices.where((d) => d.id == updated.id).firstOrNull;
     if (old != null && old.notificationId != null) {
-      try { await NotificationService.instance.cancelReminder(old.notificationId!); } catch (_) {}
+      try {
+        await NotificationService.instance.cancelReminder(old.notificationId!);
+      } catch (_) {}
     }
     String? notifId;
-    try {
-      notifId = await NotificationService.instance.scheduleDoseReminder(updated);
-    } catch (_) {}
+    if (SettingsService.instance.doseReminders &&
+        updated.active &&
+        updated.remainingDoses > 0) {
+      try {
+        notifId =
+            await NotificationService.instance.scheduleDoseReminder(updated);
+      } catch (_) {}
+    }
 
-    final withNotif = notifId != null ? updated.copyWith(notificationId: notifId) : updated;
+    final withNotif = notifId != null
+        ? updated.copyWith(notificationId: notifId)
+        : updated.copyWith(clearNotificationId: true);
     if (notifId != null) await DatabaseService.instance.updateDevice(withNotif);
+    if (notifId == null) await DatabaseService.instance.updateDevice(withNotif);
 
     state = state.copyWith(
-      devices: state.devices.map((d) => d.id == updated.id ? withNotif : d).toList(),
+      devices:
+          state.devices.map((d) => d.id == updated.id ? withNotif : d).toList(),
     );
     showToast('${updated.name} updated');
   }
@@ -259,7 +335,9 @@ class AppNotifier extends Notifier<AppState> {
     await DatabaseService.instance.deactivateDevice(deviceId);
     state = state.copyWith(
       devices: state.devices
-          .map((d) => d.id == deviceId ? d.copyWith(active: false, remainingDoses: 0) : d)
+          .map((d) => d.id == deviceId
+              ? d.copyWith(active: false, remainingDoses: 0)
+              : d)
           .toList(),
     );
   }
@@ -282,10 +360,13 @@ class AppNotifier extends Notifier<AppState> {
     );
 
     await DatabaseService.instance.insertProtocol(protocol);
-    await DatabaseService.instance.setDevicesForProtocol(protocol.id, deviceIds);
+    await DatabaseService.instance
+        .setDevicesForProtocol(protocol.id, deviceIds);
 
     final newMap = Map<String, String>.from(state.deviceProtocols);
-    for (final id in deviceIds) { newMap[id] = protocol.id; }
+    for (final id in deviceIds) {
+      newMap[id] = protocol.id;
+    }
 
     state = state.copyWith(
       protocols: [protocol, ...state.protocols],
@@ -301,10 +382,13 @@ class AppNotifier extends Notifier<AppState> {
     // Rebuild deviceProtocols map
     final newMap = Map<String, String>.from(state.deviceProtocols)
       ..removeWhere((_, v) => v == updated.id);
-    for (final id in deviceIds) { newMap[id] = updated.id; }
+    for (final id in deviceIds) {
+      newMap[id] = updated.id;
+    }
 
     state = state.copyWith(
-      protocols: state.protocols.map((p) => p.id == updated.id ? updated : p).toList(),
+      protocols:
+          state.protocols.map((p) => p.id == updated.id ? updated : p).toList(),
       deviceProtocols: newMap,
     );
     showToast('${updated.name} updated');
@@ -330,6 +414,36 @@ class AppNotifier extends Notifier<AppState> {
     await NotificationService.instance.cancelAllReminders();
     await DatabaseService.instance.clearAllData();
     state = const AppState();
+  }
+
+  Future<void> refreshDoseReminders() async {
+    await NotificationService.instance.cancelAllReminders();
+    final devices = List<Device>.from(state.devices);
+    final updated = <Device>[];
+    for (final device in devices) {
+      if (!SettingsService.instance.doseReminders ||
+          !device.active ||
+          device.remainingDoses <= 0) {
+        final cleared = device.copyWith(clearNotificationId: true);
+        await DatabaseService.instance.updateDevice(cleared);
+        updated.add(cleared);
+        continue;
+      }
+      try {
+        final notifId =
+            await NotificationService.instance.scheduleDoseReminder(device);
+        final withNotif = notifId != null
+            ? device.copyWith(notificationId: notifId)
+            : device.copyWith(clearNotificationId: true);
+        await DatabaseService.instance.updateDevice(withNotif);
+        updated.add(withNotif);
+      } catch (_) {
+        final cleared = device.copyWith(clearNotificationId: true);
+        await DatabaseService.instance.updateDevice(cleared);
+        updated.add(cleared);
+      }
+    }
+    state = state.copyWith(devices: updated);
   }
 
   // ── Undo last dose ─────────────────────────────────────────
@@ -375,9 +489,19 @@ final undoLogIdProvider =
 final protocolsProvider =
     Provider<List<Protocol>>((ref) => ref.watch(appProvider).protocols);
 
-final deviceProtocolsProvider =
-    Provider<Map<String, String>>((ref) => ref.watch(appProvider).deviceProtocols);
+final deviceProtocolsProvider = Provider<Map<String, String>>(
+    (ref) => ref.watch(appProvider).deviceProtocols);
 
-final themeModeProvider = StateProvider<ThemeMode>((ref) {
-  return SettingsService.instance.themeMode;
-});
+class ThemeModeNotifier extends Notifier<ThemeMode> {
+  @override
+  ThemeMode build() {
+    return SettingsService.instance.themeMode;
+  }
+
+  void refreshFromSettings() {
+    state = SettingsService.instance.themeMode;
+  }
+}
+
+final themeModeProvider =
+    NotifierProvider<ThemeModeNotifier, ThemeMode>(ThemeModeNotifier.new);

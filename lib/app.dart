@@ -5,6 +5,7 @@ import 'screens/main_scaffold.dart';
 import 'screens/onboarding_screen.dart';
 import 'services/settings_service.dart';
 import 'theme/app_theme.dart';
+import 'widgets/app_lock_gate.dart';
 
 class PeptideTrackApp extends ConsumerWidget {
   const PeptideTrackApp({super.key});
@@ -13,7 +14,7 @@ class PeptideTrackApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     return MaterialApp(
-      title: 'PeptideTrack',
+      title: 'Pep Tracker Pro',
       debugShowCheckedModeBanner: false,
       theme: buildAppTheme(),
       darkTheme: buildDarkTheme(),
@@ -52,6 +53,6 @@ class _AppLoaderState extends ConsumerState<_AppLoader> {
         setState(() => _showOnboarding = false);
       });
     }
-    return const MainScaffold();
+    return const AppLockGate(child: MainScaffold());
   }
 }

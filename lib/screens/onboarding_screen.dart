@@ -16,17 +16,17 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   static const _pages = [
     _OnboardingPage(
       icon: Icons.science_outlined,
-      title: 'Welcome to PeptideTrack',
+      title: 'Welcome to Pep Tracker Pro',
       body: 'Your personal peptide dose tracker. Enroll your pens and vials, log doses in seconds, and stay on schedule.',
     ),
     _OnboardingPage(
       icon: Icons.nfc_rounded,
       title: 'NFC-First Logging',
-      body: 'Attach an inexpensive NFC sticker to each compound. Tap your phone to the tag and your dose logs automatically — no menus needed.',
+      body: 'Attach an inexpensive NFC sticker to each compound. Tap your phone to the tag to log doses in seconds — no menus needed.',
     ),
     _OnboardingPage(
       icon: Icons.bar_chart_rounded,
-      title: 'Track & Analyse',
+      title: 'Track & Analyze',
       body: 'See adherence, streaks, injection site rotation, and projected depletion dates — everything you need to stay consistent.',
     ),
     _OnboardingPage(
@@ -101,7 +101,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: _next,
-                  child: Text(isLast ? 'Get Started' : 'Next'),
+                  child: Text(isLast ? 'Get started' : 'Next'),
                 ),
               ),
             ),

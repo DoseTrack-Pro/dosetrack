@@ -62,11 +62,11 @@ class _StepTypeMethodState extends State<StepTypeMethod> {
         const SizedBox(height: 16),
 
         Row(children: [
-          Expanded(child: _MethodCard(label: 'NFC Tag', subtitle: 'Scan to log automatically',
+          Expanded(child: _MethodCard(label: 'NFC Tag', subtitle: 'Scan to log quickly',
               recommended: true, selected: _useNfc,
               onTap: () => setState(() => _useNfc = true))),
           const SizedBox(width: 12),
-          Expanded(child: _MethodCard(label: 'Manual', subtitle: 'Select from app to log',
+          Expanded(child: _MethodCard(label: 'Manual', subtitle: 'Select in app to log',
               recommended: false, selected: !_useNfc,
               onTap: () => setState(() => _useNfc = false))),
         ]),

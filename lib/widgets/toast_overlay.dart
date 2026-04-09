@@ -26,27 +26,20 @@ class ToastOverlay extends ConsumerWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 decoration: BoxDecoration(
-                  color: context.clrSurface,
+                  color: AppColors.teal,
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: context.clrBorder, width: 0.5),
                   boxShadow: [BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.12),
+                    color: Colors.black.withValues(alpha: 0.18),
                     blurRadius: 16, offset: const Offset(0, 4),
                   )],
                 ),
                 child: Row(
                   children: [
-                    Container(
-                      width: 3, height: 36,
-                      decoration: BoxDecoration(
-                        color: AppColors.teal,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
+                    const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(message,
-                          style: TextStyle(color: context.clrText,
+                          style: const TextStyle(color: Colors.white,
                               fontSize: 13, fontWeight: FontWeight.w500)),
                     ),
                     if (showUndo) ...[
@@ -56,11 +49,11 @@ class ToastOverlay extends ConsumerWidget {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                           decoration: BoxDecoration(
-                            color: AppColors.teal,
+                            color: Colors.white,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Text('Undo',
-                              style: TextStyle(color: Colors.white,
+                              style: TextStyle(color: AppColors.tealDark,
                                   fontSize: 12, fontWeight: FontWeight.w700)),
                         ),
                       ),

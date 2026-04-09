@@ -18,7 +18,7 @@ class DatabaseService {
     final dbPath = await getDatabasesPath();
     _db = await openDatabase(
       join(dbPath, 'peptidetrack.db'),
-      version: 4,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -42,6 +42,10 @@ class DatabaseService {
         remaining_doses INTEGER NOT NULL,
         schedule TEXT NOT NULL,
         schedule_days TEXT,
+        expiry_days INTEGER NOT NULL DEFAULT 30,
+        schedule_start_date TEXT,
+        is_blend INTEGER NOT NULL DEFAULT 0,
+        blend_components_json TEXT,
         nfc_tag_id TEXT,
         alert_threshold_pct INTEGER NOT NULL DEFAULT 20,
         notification_id TEXT,
@@ -95,6 +99,10 @@ class DatabaseService {
     if (oldVersion < 3) {
       await db.execute('ALTER TABLE devices ADD COLUMN schedule_days TEXT');
     }
+    if (oldVersion < 5) {
+      await db.execute(
+          'ALTER TABLE devices ADD COLUMN expiry_days INTEGER NOT NULL DEFAULT 30');
+    }
     if (oldVersion < 4) {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS protocols (
@@ -114,6 +122,16 @@ class DatabaseService {
           FOREIGN KEY (device_id) REFERENCES devices(id)
         )
       ''');
+    }
+    if (oldVersion < 6) {
+      await db.execute(
+          'ALTER TABLE devices ADD COLUMN is_blend INTEGER NOT NULL DEFAULT 0');
+      await db
+          .execute('ALTER TABLE devices ADD COLUMN blend_components_json TEXT');
+    }
+    if (oldVersion < 7) {
+      await db
+          .execute('ALTER TABLE devices ADD COLUMN schedule_start_date TEXT');
     }
   }
 
@@ -149,7 +167,8 @@ class DatabaseService {
   }
 
   Future<void> updateDevice(Device device) async {
-    await db.update('devices', device.toMap(), where: 'id = ?', whereArgs: [device.id]);
+    await db.update('devices', device.toMap(),
+        where: 'id = ?', whereArgs: [device.id]);
   }
 
   Future<void> updateRemainingDoses(String deviceId, int remaining) async {
@@ -162,7 +181,8 @@ class DatabaseService {
   }
 
   Future<void> deactivateDevice(String deviceId) async {
-    await db.update('devices', {'active': 0, 'remaining_doses': 0}, where: 'id = ?', whereArgs: [deviceId]);
+    await db.update('devices', {'active': 0, 'remaining_doses': 0},
+        where: 'id = ?', whereArgs: [deviceId]);
   }
 
   Future<void> deleteAllDevices() async => db.delete('devices');
@@ -189,7 +209,8 @@ class DatabaseService {
   }
 
   Future<void> updateDoseLog(DoseLog log) async {
-    await db.update('dose_logs', log.toMap(), where: 'id = ?', whereArgs: [log.id]);
+    await db
+        .update('dose_logs', log.toMap(), where: 'id = ?', whereArgs: [log.id]);
   }
 
   Future<void> deleteDoseLog(String logId) async {
@@ -210,31 +231,41 @@ class DatabaseService {
   }
 
   Future<void> updateProtocol(Protocol protocol) async {
-    await db.update('protocols', protocol.toMap(), where: 'id = ?', whereArgs: [protocol.id]);
+    await db.update('protocols', protocol.toMap(),
+        where: 'id = ?', whereArgs: [protocol.id]);
   }
 
   Future<void> deleteProtocol(String protocolId) async {
-    await db.delete('protocol_devices', where: 'protocol_id = ?', whereArgs: [protocolId]);
+    await db.delete('protocol_devices',
+        where: 'protocol_id = ?', whereArgs: [protocolId]);
     await db.delete('protocols', where: 'id = ?', whereArgs: [protocolId]);
   }
 
   Future<Map<String, String>> getDeviceProtocolMap() async {
     final rows = await db.query('protocol_devices');
-    return {for (final r in rows) r['device_id'] as String: r['protocol_id'] as String};
+    return {
+      for (final r in rows) r['device_id'] as String: r['protocol_id'] as String
+    };
   }
 
-  Future<void> setDevicesForProtocol(String protocolId, List<String> deviceIds) async {
-    await db.delete('protocol_devices', where: 'protocol_id = ?', whereArgs: [protocolId]);
+  Future<void> setDevicesForProtocol(
+      String protocolId, List<String> deviceIds) async {
+    await db.delete('protocol_devices',
+        where: 'protocol_id = ?', whereArgs: [protocolId]);
     for (final deviceId in deviceIds) {
-      await db.insert('protocol_devices', {
-        'protocol_id': protocolId,
-        'device_id': deviceId,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await db.insert(
+          'protocol_devices',
+          {
+            'protocol_id': protocolId,
+            'device_id': deviceId,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace);
     }
   }
 
   Future<void> removeDeviceFromAllProtocols(String deviceId) async {
-    await db.delete('protocol_devices', where: 'device_id = ?', whereArgs: [deviceId]);
+    await db.delete('protocol_devices',
+        where: 'device_id = ?', whereArgs: [deviceId]);
   }
 
   // ── Clear all ─────────────────────────────────────────────────

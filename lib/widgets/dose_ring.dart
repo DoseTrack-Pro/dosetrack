@@ -26,40 +26,46 @@ class DoseRing extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size,
-      child: CustomPaint(
-        painter: _DoseRingPainter(
-          progress: progress,
-          trackColor: AppColors.border,
-          arcColor: color,
-          strokeWidth: strokeWidth,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(end: progress.clamp(0.0, 1.0)),
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOutCubic,
+        builder: (context, animatedProgress, _) => CustomPaint(
+          painter: _DoseRingPainter(
+            progress: animatedProgress,
+            trackColor: AppColors.border,
+            arcColor: color,
+            strokeWidth: strokeWidth,
+          ),
+          child: showLabel
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '$remaining',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                          fontSize: size < 80 ? 13 : 22,
+                          fontWeight: FontWeight.w600,
+                          color: color,
+                          height: 1.1,
+                        ),
+                      ),
+                      Text(
+                        'left',
+                        style: TextStyle(
+                          fontSize: size < 80 ? 9 : 11,
+                          color: AppColors.textTertiary,
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : null,
         ),
-        child: showLabel
-            ? Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      '$remaining',
-                      style: TextStyle(
-                        fontFamily: 'Courier New',
-                        fontSize: size < 80 ? 13 : 22,
-                        fontWeight: FontWeight.w600,
-                        color: color,
-                        height: 1.1,
-                      ),
-                    ),
-                    Text(
-                      'left',
-                      style: TextStyle(
-                        fontSize: size < 80 ? 9 : 11,
-                        color: AppColors.textTertiary,
-                        height: 1.2,
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            : null,
       ),
     );
   }

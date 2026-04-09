@@ -6,6 +6,7 @@ import '../models/dose_log.dart';
 import '../providers/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/calculations.dart';
+import '../widgets/body_site_picker.dart';
 
 class DoseDetailPage extends ConsumerStatefulWidget {
   final DoseLog log;
@@ -313,31 +314,14 @@ class _DoseDetailPageState extends ConsumerState<DoseDetailPage> {
 
                   // Injection site
                   _SectionLabel('INJECTION SITE'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: kInjectionSites.map((site) {
-                      final active = _selectedSite == site;
-                      return GestureDetector(
-                        onTap: () => setState(() => _selectedSite = site),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                          decoration: BoxDecoration(
-                            color: active ? context.clrTealBg : context.clrSurface,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: active ? AppColors.teal : context.clrBorder,
-                              width: active ? 1.5 : 0.5,
-                            ),
-                          ),
-                          child: Text(site, style: TextStyle(
-                            fontSize: 13, fontWeight: FontWeight.w500,
-                            color: active ? AppColors.tealDark : context.clrTextSub,
-                          )),
-                        ),
-                      );
-                    }).toList(),
+                  const SizedBox(height: 10),
+                  BodySitePicker(
+                    selectedSite: _selectedSite,
+                    recentCounts: siteUsageCounts(
+                      ref.read(doseLogsProvider),
+                      widget.log.deviceId,
+                    ),
+                    onChanged: (site) => setState(() => _selectedSite = site),
                   ),
                   const SizedBox(height: 20),
 
@@ -360,7 +344,7 @@ class _DoseDetailPageState extends ConsumerState<DoseDetailPage> {
                     width: double.infinity,
                     child: ElevatedButton(
                       onPressed: _saving ? null : _save,
-                      child: Text(_saving ? 'Saving…' : 'Save Changes'),
+                      child: Text(_saving ? 'Saving…' : 'Save changes'),
                     ),
                   ),
                   const SizedBox(height: 12),

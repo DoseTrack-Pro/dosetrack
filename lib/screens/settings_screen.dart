@@ -6,9 +6,10 @@ import 'package:file_picker/file_picker.dart';
 import '../providers/app_state.dart';
 import '../models/device.dart';
 import '../models/dose_log.dart';
+import '../models/protocol.dart';
 import '../services/database_service.dart';
 import '../services/export_service.dart';
-import '../services/notification_service.dart';
+import '../services/app_lock_service.dart';
 import '../services/settings_service.dart';
 import '../theme/app_theme.dart';
 import 'package:share_plus/share_plus.dart';
@@ -27,31 +28,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   late bool _confirmLog;
   late int _nfcTimeout;
   late int _themeModePref;
+  late bool _appLockEnabled;
+  late bool _appLockBiometric;
+  late int _appLockTimeoutMins;
+  bool _biometricSupported = false;
 
   @override
   void initState() {
     super.initState();
     final s = SettingsService.instance;
     _doseReminders = s.doseReminders;
-    _lowInventory  = s.lowInventoryAlerts;
-    _missedDose    = s.missedDoseAlerts;
-    _autoLog       = s.nfcAutoLog;
-    _confirmLog    = s.nfcConfirmLog;
-    _nfcTimeout    = s.nfcScanTimeout;
+    _lowInventory = s.lowInventoryAlerts;
+    _missedDose = s.missedDoseAlerts;
+    _autoLog = s.nfcAutoLog;
+    _confirmLog = s.nfcConfirmLog;
+    _nfcTimeout = s.nfcScanTimeout;
     _themeModePref = s.themeModePref;
+    _appLockEnabled = s.appLockEnabled;
+    _appLockBiometric = s.appLockBiometrics;
+    _appLockTimeoutMins = s.appLockTimeoutMinutes;
+    Future.microtask(() async {
+      final supported = await AppLockService.instance.supportsBiometrics();
+      if (mounted) setState(() => _biometricSupported = supported);
+    });
   }
 
   Future<void> _setDoseReminders(bool v) async {
     await SettingsService.instance.setDoseReminders(v);
     setState(() => _doseReminders = v);
-    final devices = ref.read(devicesProvider).where((d) => d.active).toList();
-    if (!v) {
-      await NotificationService.instance.cancelAllReminders();
-    } else {
-      for (final d in devices) {
-        await NotificationService.instance.scheduleDoseReminder(d);
-      }
-    }
+    await ref.read(appProvider.notifier).refreshDoseReminders();
   }
 
   Future<void> _setLowInventory(bool v) async {
@@ -83,8 +88,51 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await SettingsService.instance.setThemeModePref(v);
     setState(() => _themeModePref = v);
     if (mounted) {
-      ref.read(themeModeProvider.notifier).state = SettingsService.instance.themeMode;
+      ref.read(themeModeProvider.notifier).refreshFromSettings();
     }
+  }
+
+  Future<void> _setAppLockEnabled(bool v) async {
+    if (v) {
+      final hasPin = await AppLockService.instance.hasPin();
+      if (!hasPin) {
+        final pin = await _promptForPin(initialSetup: true);
+        if (pin == null) return;
+        await AppLockService.instance.savePin(pin);
+      }
+    }
+    await SettingsService.instance.setAppLockEnabled(v);
+    setState(() => _appLockEnabled = v);
+  }
+
+  Future<void> _setAppLockBiometric(bool v) async {
+    await SettingsService.instance.setAppLockBiometrics(v);
+    setState(() => _appLockBiometric = v);
+  }
+
+  Future<void> _setAppLockTimeout(int mins) async {
+    await SettingsService.instance.setAppLockTimeoutMinutes(mins);
+    setState(() => _appLockTimeoutMins = mins);
+  }
+
+  Future<void> _changePin() async {
+    final pin = await _promptForPin(initialSetup: false);
+    if (pin == null) return;
+    await AppLockService.instance.savePin(pin);
+    if (mounted) _showMessage('PIN updated');
+  }
+
+  void _lockNow() {
+    AppLockService.instance.requestLockNow();
+    _showMessage('App locked');
+  }
+
+  Future<String?> _promptForPin({required bool initialSetup}) async {
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _PinSetupDialog(initialSetup: initialSetup),
+    );
   }
 
   @override
@@ -98,7 +146,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               color: context.clrSurface,
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
               child: Row(children: [
-                Text('Settings', style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: context.clrText)),
+                Text('Settings',
+                    style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.w700,
+                        color: context.clrText)),
               ]),
             ),
             Expanded(
@@ -118,16 +170,86 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
                   // Notifications
                   _Section(title: 'Notifications', children: [
-                    _ToggleRow(label: 'Dose reminders', subtitle: 'Alert when a dose is due', value: _doseReminders, onChanged: _setDoseReminders),
-                    _ToggleRow(label: 'Low inventory', subtitle: 'Alert when a compound is running low', value: _lowInventory, onChanged: _setLowInventory),
-                    _ToggleRow(label: 'Missed dose', subtitle: 'Alert on next launch when a dose was skipped', value: _missedDose, onChanged: _setMissedDose),
+                    _ToggleRow(
+                        label: 'Dose reminders',
+                        subtitle: 'Alert when a dose is due',
+                        value: _doseReminders,
+                        onChanged: _setDoseReminders),
+                    _ToggleRow(
+                        label: 'Low inventory',
+                        subtitle: 'Alert when a compound is running low',
+                        value: _lowInventory,
+                        onChanged: _setLowInventory),
+                    _ToggleRow(
+                        label: 'Missed dose',
+                        subtitle:
+                            'Alert on next launch when a dose was skipped',
+                        value: _missedDose,
+                        onChanged: _setMissedDose),
+                  ]),
+                  const SizedBox(height: 20),
+
+                  // Privacy lock
+                  _Section(title: 'Privacy Lock', children: [
+                    _ToggleRow(
+                      label: 'Require unlock',
+                      subtitle: 'Lock app content behind PIN/biometric',
+                      value: _appLockEnabled,
+                      onChanged: _setAppLockEnabled,
+                    ),
+                    if (_appLockEnabled) ...[
+                      _ToggleRow(
+                        label: 'Use biometrics',
+                        subtitle: _biometricSupported
+                            ? 'Use Face ID / fingerprint when available'
+                            : 'Biometric unlock is not available on this device',
+                        value: _appLockBiometric && _biometricSupported,
+                        onChanged:
+                            _biometricSupported ? _setAppLockBiometric : (_) {},
+                      ),
+                      _SegmentRow(
+                        label: 'Inactivity lock timer',
+                        subtitle:
+                            'How long app can stay in background before lock',
+                        options: const ['Now', '1m', '5m', '15m'],
+                        optionValues: const [0, 1, 5, 15],
+                        selected: [0, 1, 5, 15]
+                            .indexOf(_appLockTimeoutMins)
+                            .clamp(0, 3),
+                        onChanged: (i) => _setAppLockTimeout([0, 1, 5, 15][i]),
+                      ),
+                      _ActionRow(
+                        label: 'Change PIN',
+                        subtitle: 'Update your 4-digit app lock PIN',
+                        onTap: _changePin,
+                      ),
+                      _ActionRow(
+                        label: 'Lock now',
+                        subtitle: 'Immediately lock app content',
+                        onTap: _lockNow,
+                      ),
+                      const _NoteRow(
+                        text:
+                            'Inactivity timer starts when app goes to background. '
+                            'App content locks after selected time.',
+                      ),
+                    ],
                   ]),
                   const SizedBox(height: 20),
 
                   // NFC
                   _Section(title: 'NFC Scanning', children: [
-                    _ToggleRow(label: 'Auto-log on scan', subtitle: 'Record dose immediately when tag detected (no confirmation)', value: _autoLog, onChanged: _setAutoLog),
-                    _ToggleRow(label: 'Confirm before logging', subtitle: 'Always show confirmation step before saving', value: _confirmLog, onChanged: _setConfirmLog),
+                    _ToggleRow(
+                        label: 'Auto-log on scan',
+                        subtitle:
+                            'Record dose immediately when tag detected (no confirmation)',
+                        value: _autoLog,
+                        onChanged: _setAutoLog),
+                    _ToggleRow(
+                        label: 'Confirm before logging',
+                        subtitle: 'Always show confirmation step before saving',
+                        value: _confirmLog,
+                        onChanged: _setConfirmLog),
                     _SegmentRow(
                       label: 'Scan timeout',
                       subtitle: 'seconds to wait for a tag',
@@ -140,27 +262,50 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   const SizedBox(height: 20),
 
                   // Inventory
-                  _Section(title: 'Inventory Thresholds', children: [
-                    _InfoRow(label: 'Low stock alert', value: '${SettingsService.instance.nfcScanTimeout} sec scan'),
-                    const _InfoRow(label: 'Low stock threshold', value: 'Per compound'),
+                  const _Section(title: 'Inventory Thresholds', children: [
+                    _InfoRow(
+                        label: 'Low stock alerts',
+                        value: 'Enabled above in Notifications'),
+                    _InfoRow(
+                        label: 'Low stock threshold',
+                        value: 'Set per compound'),
                   ]),
                   const SizedBox(height: 20),
 
                   // Data
                   _Section(title: 'Data & Export', children: [
-                    _ActionRow(label: 'Export as CSV', subtitle: 'Download all data as a spreadsheet', onTap: _exportCsv),
-                    _ActionRow(label: 'Export as PDF', subtitle: 'Download a formatted dose report', onTap: _exportPdf),
-                    _ActionRow(label: 'Backup data (JSON)', subtitle: 'Export all data for safekeeping', onTap: _backupJson),
-                    _ActionRow(label: 'Restore from backup', subtitle: 'Pick a JSON backup file to restore', onTap: _pickAndRestore),
+                    _ActionRow(
+                        label: 'Export as CSV',
+                        subtitle: 'Download all data as a spreadsheet',
+                        onTap: _exportCsv),
+                    _ActionRow(
+                        label: 'Export as PDF',
+                        subtitle: 'Download a formatted dose report',
+                        onTap: _exportPdf),
+                    _ActionRow(
+                        label: 'Backup data (JSON)',
+                        subtitle: 'Export all data for safekeeping',
+                        onTap: _backupJson),
+                    _ActionRow(
+                        label: 'Restore from backup',
+                        subtitle: 'Pick a JSON backup file to restore',
+                        onTap: _pickAndRestore),
                   ]),
                   const SizedBox(height: 20),
 
                   // Danger zone
                   _Section(title: 'Danger Zone', children: [
-                    _ActionRow(label: 'Clear all data', subtitle: 'Permanently erase all compounds and logs', danger: true, onTap: _clearData),
+                    _ActionRow(
+                        label: 'Clear all data',
+                        subtitle: 'Permanently erase all compounds and logs',
+                        danger: true,
+                        onTap: _clearData),
                   ]),
                   const SizedBox(height: 32),
-                  Center(child: Text('PeptideTrack v1.0.0', style: TextStyle(fontSize: 12, color: context.clrTextHint))),
+                  Center(
+                      child: Text('Pep Tracker Pro v1.0.0',
+                          style: TextStyle(
+                              fontSize: 12, color: context.clrTextHint))),
                   const SizedBox(height: 20),
                 ],
               ),
@@ -197,9 +342,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         'exported': DateTime.now().toIso8601String(),
         'devices': state.devices.map((d) => d.toMap()).toList(),
         'logs': state.doseLogs.map((l) => l.toMap()).toList(),
+        'protocols': state.protocols.map((p) => p.toMap()).toList(),
+        'deviceProtocols': state.deviceProtocols,
       };
       final json = const JsonEncoder.withIndent('  ').convert(data);
-      await Share.share(json, subject: 'PeptideTrack Backup');
+      await Share.share(json, subject: 'Pep Tracker Pro Backup');
     } catch (e) {
       if (mounted) _showError('Backup failed: $e');
     }
@@ -211,17 +358,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: context.clrSurface,
-        title: Text('Restore from Backup', style: TextStyle(color: context.clrText)),
+        title: Text('Restore from Backup',
+            style: TextStyle(color: context.clrText)),
         content: Text(
           'This will replace ALL current data with the contents of the backup file. This cannot be undone.',
           style: TextStyle(fontSize: 13, color: context.clrTextSub),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(foregroundColor: AppColors.red),
-            child: const Text('Choose File'),
+            child: const Text('Choose file'),
           ),
         ],
       ),
@@ -229,7 +379,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (confirmed != true) return;
 
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['json'],
         withData: false,
@@ -252,24 +402,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final data = jsonDecode(raw) as Map<String, dynamic>;
       final deviceMaps = (data['devices'] as List).cast<Map<String, dynamic>>();
       final logMaps = (data['logs'] as List).cast<Map<String, dynamic>>();
+      final protocolMaps = ((data['protocols'] as List?) ?? const [])
+          .cast<Map<String, dynamic>>();
+      final deviceProtocolRaw = (data['deviceProtocols'] as Map?) ?? const {};
+      final deviceProtocols = deviceProtocolRaw.map(
+        (k, v) => MapEntry(k.toString(), v.toString()),
+      );
       final devices = deviceMaps.map(Device.fromMap).toList();
       final logs = logMaps.map(DoseLog.fromMap).toList();
+      final protocols = protocolMaps.map(Protocol.fromMap).toList();
 
       await ref.read(appProvider.notifier).clearAllData();
       for (final d in devices) {
-        await ref.read(appProvider.notifier).enrollDevice(
-          name: d.name, type: d.type, vendor: d.vendor,
-          batchNumber: d.batchNumber, coaUrl: d.coaUrl,
-          reconstitutionDate: d.reconstitutionDate,
-          peptideMg: d.peptideMg, reconVolumeMl: d.reconVolumeMl,
-          desiredDoseMcg: d.desiredDoseMcg, schedule: d.schedule,
-          alertThresholdPct: d.alertThresholdPct, nfcTagId: d.nfcTagId,
-        );
+        // Restore exact row (preserve IDs, dates, schedule days, thresholds, and linkage).
+        await DatabaseService.instance
+            .insertDevice(d.copyWith(clearNotificationId: true));
       }
       for (final log in logs) {
         await DatabaseService.instance.insertDoseLog(log);
       }
+      for (final protocol in protocols) {
+        await DatabaseService.instance.insertProtocol(protocol);
+      }
+      final idsByProtocol = <String, List<String>>{};
+      for (final entry in deviceProtocols.entries) {
+        idsByProtocol.putIfAbsent(entry.value, () => []).add(entry.key);
+      }
+      for (final entry in idsByProtocol.entries) {
+        await DatabaseService.instance
+            .setDevicesForProtocol(entry.key, entry.value);
+      }
       await ref.read(appProvider.notifier).initialize();
+      await ref.read(appProvider.notifier).refreshDoseReminders();
       if (mounted) _showMessage('Backup restored successfully');
     } catch (e) {
       if (mounted) _showError('Restore failed: invalid backup file');
@@ -282,17 +446,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       builder: (_) => AlertDialog(
         backgroundColor: context.clrSurface,
         title: Text('Clear All Data', style: TextStyle(color: context.clrText)),
-        content: Text('This will permanently delete all compounds and dose history. This cannot be undone.',
+        content: Text(
+            'This will permanently delete all compounds and dose history. This cannot be undone.',
             style: TextStyle(color: context.clrTextSub)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
               await ref.read(appProvider.notifier).clearAllData();
             },
             style: TextButton.styleFrom(foregroundColor: AppColors.red),
-            child: const Text('Clear Everything'),
+            child: const Text('Clear everything'),
           ),
         ],
       ),
@@ -300,7 +467,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: AppColors.red));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: AppColors.red));
   }
 
   void _showMessage(String msg) {
@@ -320,8 +488,12 @@ class _Section extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Padding(
         padding: const EdgeInsets.only(left: 4, bottom: 8),
-        child: Text(title.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-            color: context.clrTextSub, letterSpacing: 0.7)),
+        child: Text(title.toUpperCase(),
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: context.clrTextSub,
+                letterSpacing: 0.7)),
       ),
       Container(
         decoration: BoxDecoration(
@@ -335,7 +507,8 @@ class _Section extends StatelessWidget {
             final child = entry.$2;
             return Column(children: [
               child,
-              if (idx < children.length - 1) Divider(height: 0, indent: 16, color: context.clrBorder),
+              if (idx < children.length - 1)
+                Divider(height: 0, indent: 16, color: context.clrBorder),
             ]);
           }).toList(),
         ),
@@ -348,20 +521,36 @@ class _ToggleRow extends StatelessWidget {
   final String label, subtitle;
   final bool value;
   final ValueChanged<bool> onChanged;
-  const _ToggleRow({required this.label, required this.subtitle, required this.value, required this.onChanged});
+  const _ToggleRow(
+      {required this.label,
+      required this.subtitle,
+      required this.value,
+      required this.onChanged});
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    child: Row(children: [
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: context.clrText)),
-        const SizedBox(height: 2),
-        Text(subtitle, style: TextStyle(fontSize: 12, color: context.clrTextSub)),
-      ])),
-      Switch(value: value, onChanged: onChanged, activeColor: AppColors.teal),
-    ]),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(children: [
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: context.clrText)),
+                const SizedBox(height: 2),
+                Text(subtitle,
+                    style: TextStyle(fontSize: 12, color: context.clrTextSub)),
+              ])),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeThumbColor: AppColors.teal,
+          ),
+        ]),
+      );
 }
 
 class _SegmentRow extends StatelessWidget {
@@ -371,49 +560,67 @@ class _SegmentRow extends StatelessWidget {
   final List<int>? optionValues;
   final int selected;
   final ValueChanged<int> onChanged;
-  const _SegmentRow({required this.label, this.subtitle, required this.options, this.optionValues, required this.selected, required this.onChanged});
+  const _SegmentRow(
+      {required this.label,
+      this.subtitle,
+      required this.options,
+      this.optionValues,
+      required this.selected,
+      required this.onChanged});
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-    child: Row(children: [
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: context.clrText)),
-        if (subtitle != null) ...[
-          const SizedBox(height: 2),
-          Text(subtitle!, style: TextStyle(fontSize: 12, color: context.clrTextSub)),
-        ],
-      ])),
-      const SizedBox(width: 12),
-      Container(
-        decoration: BoxDecoration(
-          color: context.clrBg,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: context.clrBorder, width: 0.5),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: options.asMap().entries.map((e) {
-            final active = selected == e.key;
-            return GestureDetector(
-              onTap: () => onChanged(e.key),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: active ? AppColors.teal : Colors.transparent,
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                child: Text(e.value, style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w600,
-                  color: active ? Colors.white : context.clrTextSub,
-                )),
-              ),
-            );
-          }).toList(),
-        ),
-      ),
-    ]),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(children: [
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(label,
+                    style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: context.clrText)),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 2),
+                  Text(subtitle!,
+                      style:
+                          TextStyle(fontSize: 12, color: context.clrTextSub)),
+                ],
+              ])),
+          const SizedBox(width: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: context.clrBg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: context.clrBorder, width: 0.5),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: options.asMap().entries.map((e) {
+                final active = selected == e.key;
+                return GestureDetector(
+                  onTap: () => onChanged(e.key),
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: active ? AppColors.teal : Colors.transparent,
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: Text(e.value,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: active ? Colors.white : context.clrTextSub,
+                        )),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ]),
+      );
 }
 
 class _InfoRow extends StatelessWidget {
@@ -422,35 +629,155 @@ class _InfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-    child: Row(children: [
-      Expanded(child: Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500, color: context.clrText))),
-      Text(value, style: TextStyle(fontSize: 13, color: context.clrTextSub)),
-    ]),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(children: [
+          Expanded(
+              child: Text(label,
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: context.clrText))),
+          Text(value,
+              style: TextStyle(fontSize: 13, color: context.clrTextSub)),
+        ]),
+      );
+}
+
+class _NoteRow extends StatelessWidget {
+  final String text;
+  const _NoteRow({required this.text});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Text(
+          text,
+          style:
+              TextStyle(fontSize: 12, color: context.clrTextSub, height: 1.35),
+        ),
+      );
+}
+
+class _PinSetupDialog extends StatefulWidget {
+  final bool initialSetup;
+  const _PinSetupDialog({required this.initialSetup});
+
+  @override
+  State<_PinSetupDialog> createState() => _PinSetupDialogState();
+}
+
+class _PinSetupDialogState extends State<_PinSetupDialog> {
+  final _pinCtrl = TextEditingController();
+  final _confirmCtrl = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _pinCtrl.dispose();
+    _confirmCtrl.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final pin = _pinCtrl.text.trim();
+    final confirm = _confirmCtrl.text.trim();
+    if (pin.length != 4 || int.tryParse(pin) == null) {
+      setState(() => _error = 'PIN must be 4 digits');
+      return;
+    }
+    if (pin != confirm) {
+      setState(() => _error = 'PINs do not match');
+      return;
+    }
+    Navigator.of(context).pop(pin);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: context.clrSurface,
+      title: Text(
+        widget.initialSetup ? 'Set app lock PIN' : 'Change PIN',
+        style: TextStyle(color: context.clrText),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _pinCtrl,
+            keyboardType: TextInputType.number,
+            maxLength: 4,
+            obscureText: true,
+            decoration: const InputDecoration(
+              counterText: '',
+              labelText: 'PIN',
+              hintText: '4 digits',
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _confirmCtrl,
+            keyboardType: TextInputType.number,
+            maxLength: 4,
+            obscureText: true,
+            onSubmitted: (_) => _save(),
+            decoration: InputDecoration(
+              counterText: '',
+              labelText: 'Confirm PIN',
+              hintText: '4 digits',
+              errorText: _error,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: _save,
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
 }
 
 class _ActionRow extends StatelessWidget {
   final String label, subtitle;
   final bool danger;
   final VoidCallback onTap;
-  const _ActionRow({required this.label, required this.subtitle, this.danger = false, required this.onTap});
+  const _ActionRow(
+      {required this.label,
+      required this.subtitle,
+      this.danger = false,
+      required this.onTap});
 
   @override
   Widget build(BuildContext context) => InkWell(
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(14),
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-      child: Row(children: [
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500,
-              color: danger ? AppColors.red : context.clrText)),
-          const SizedBox(height: 2),
-          Text(subtitle, style: TextStyle(fontSize: 12, color: context.clrTextSub)),
-        ])),
-        Icon(Icons.chevron_right_rounded, color: danger ? AppColors.red : context.clrTextHint, size: 20),
-      ]),
-    ),
-  );
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          child: Row(children: [
+            Expanded(
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                  Text(label,
+                      style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: danger ? AppColors.red : context.clrText)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style:
+                          TextStyle(fontSize: 12, color: context.clrTextSub)),
+                ])),
+            Icon(Icons.chevron_right_rounded,
+                color: danger ? AppColors.red : context.clrTextHint, size: 20),
+          ]),
+        ),
+      );
 }

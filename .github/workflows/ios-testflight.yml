@@ -1,0 +1,61 @@
+name: iOS TestFlight
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Every Monday at 12:00 UTC (adjust as needed)
+    - cron: "0 12 * * 1"
+
+jobs:
+  build-and-upload:
+    runs-on: macos-14
+    timeout-minutes: 60
+    env:
+      BUNDLE_ID: ${{ secrets.IOS_BUNDLE_ID }}
+      APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_KEY_IDENTIFIER: ${{ secrets.APP_STORE_CONNECT_KEY_IDENTIFIER }}
+      APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Install Codemagic CLI tools
+        run: python3 -m pip install --upgrade pip codemagic-cli-tools
+
+      - name: Fetch signing files from App Store Connect
+        run: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+
+      - name: Set up temporary keychain and certificates
+        run: |
+          keychain initialize
+          keychain add-certificates
+
+      - name: Apply provisioning profiles to Xcode project
+        run: xcode-project use-profiles
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Build IPA
+        run: flutter build ipa --release
+
+      - name: Upload IPA to TestFlight
+        run: |
+          IPA_PATH=$(ls build/ios/ipa/*.ipa | head -n 1)
+          app-store-connect publish \
+            --path "$IPA_PATH" \
+            --submit-to-testflight

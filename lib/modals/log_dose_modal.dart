@@ -6,6 +6,7 @@ import '../providers/app_state.dart';
 import '../theme/app_theme.dart';
 import '../utils/calculations.dart';
 import '../widgets/dose_ring.dart';
+import '../widgets/body_site_picker.dart';
 
 class LogDoseModal extends ConsumerStatefulWidget {
   final Device device;
@@ -29,8 +30,8 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
   void initState() {
     super.initState();
     _notesCtrl = TextEditingController();
-    _mcgCtrl = TextEditingController(
-        text: _fmtDose(widget.device.desiredDoseMcg));
+    _mcgCtrl =
+        TextEditingController(text: _fmtDose(widget.device.desiredDoseMcg));
     _iuCtrl = TextEditingController(
         text: widget.device.doseVolumeIu.toStringAsFixed(1));
     _selectedSite = _suggestNextSite();
@@ -77,27 +78,32 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
   }
 
   String _suggestNextSite() {
-    final logs = ref.read(doseLogsProvider)
+    final logs = ref
+        .read(doseLogsProvider)
         .where((l) => l.deviceId == widget.device.id && l.injectionSite != null)
         .toList();
     if (logs.isEmpty) return kInjectionSites.first;
     logs.sort((a, b) => b.loggedAt.compareTo(a.loggedAt));
-    final idx = kInjectionSites.indexOf(logs.first.injectionSite!);
+    final normalized = normalizeInjectionSite(logs.first.injectionSite);
+    final idx = normalized != null ? kInjectionSites.indexOf(normalized) : -1;
     return kInjectionSites[(idx + 1) % kInjectionSites.length];
   }
 
   bool _alreadyLoggedToday() {
     final today = DateTime.now();
-    return ref.read(doseLogsProvider).any((l) =>
-      l.deviceId == widget.device.id &&
-      l.loggedAt.year == today.year &&
-      l.loggedAt.month == today.month &&
-      l.loggedAt.day == today.day,
-    );
+    return ref.read(doseLogsProvider).any(
+          (l) =>
+              l.deviceId == widget.device.id &&
+              l.loggedAt.year == today.year &&
+              l.loggedAt.month == today.month &&
+              l.loggedAt.day == today.day,
+        );
   }
 
-  double get _currentMcg => double.tryParse(_mcgCtrl.text) ?? widget.device.desiredDoseMcg;
-  double get _currentIu  => double.tryParse(_iuCtrl.text)  ?? widget.device.doseVolumeIu;
+  double get _currentMcg =>
+      double.tryParse(_mcgCtrl.text) ?? widget.device.desiredDoseMcg;
+  double get _currentIu =>
+      double.tryParse(_iuCtrl.text) ?? widget.device.doseVolumeIu;
 
   bool get _isDoseModified =>
       (_currentMcg - widget.device.desiredDoseMcg).abs() > 0.5 ||
@@ -113,13 +119,13 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
     }
 
     await ref.read(appProvider.notifier).logDose(
-      device.id,
-      LogMethod.manual,
-      notes: _notesCtrl.text,
-      injectionSite: _selectedSite,
-      overrideDoseMcg: _isDoseModified ? _currentMcg : null,
-      overrideDoseIu: _isDoseModified ? _currentIu : null,
-    );
+          device.id,
+          LogMethod.manual,
+          notes: _notesCtrl.text,
+          injectionSite: _selectedSite,
+          overrideDoseMcg: _isDoseModified ? _currentMcg : null,
+          overrideDoseIu: _isDoseModified ? _currentIu : null,
+        );
     if (mounted) Navigator.pop(context);
   }
 
@@ -128,17 +134,20 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: context.clrSurface,
-        title: Text('Already logged today', style: TextStyle(color: context.clrText)),
+        title: Text('Already logged today',
+            style: TextStyle(color: context.clrText)),
         content: Text(
           'You\'ve already logged a dose of ${widget.device.name} today. Log another anyway?',
           style: TextStyle(color: context.clrTextSub),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: TextButton.styleFrom(foregroundColor: AppColors.amber),
-            child: const Text('Log Anyway'),
+            child: const Text('Log anyway'),
           ),
         ],
       ),
@@ -159,36 +168,65 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
       ),
       child: SafeArea(
         top: false,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 28),
+        child: SingleChildScrollView(
+          padding: EdgeInsets.fromLTRB(
+              20, 16, 20, MediaQuery.of(context).viewInsets.bottom + 28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(child: Container(width: 36, height: 4,
-                  decoration: BoxDecoration(color: context.clrBorderStrong, borderRadius: BorderRadius.circular(2)))),
+              Center(
+                  child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                          color: context.clrBorderStrong,
+                          borderRadius: BorderRadius.circular(2)))),
               const SizedBox(height: 16),
 
-              Text(device.name, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: context.clrText)),
-              Text('${device.type.name[0].toUpperCase()}${device.type.name.substring(1)}  ·  ${device.vendor}',
+              Text(device.name,
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w700,
+                      color: context.clrText)),
+              Text(
+                  '${device.type.name[0].toUpperCase()}${device.type.name.substring(1)}  ·  ${device.vendor}',
                   style: TextStyle(fontSize: 13, color: context.clrTextSub)),
               const SizedBox(height: 20),
 
               // Ring + stats
               Row(children: [
-                DoseRing(remaining: device.remainingDoses, total: device.totalDoses, size: 110, strokeWidth: 8),
+                DoseRing(
+                    remaining: device.remainingDoses,
+                    total: device.totalDoses,
+                    size: 110,
+                    strokeWidth: 8),
                 const SizedBox(width: 16),
-                Expanded(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                Expanded(
+                    child: Column(mainAxisSize: MainAxisSize.min, children: [
                   Row(children: [
-                    Expanded(child: _StatCard(label: 'Remaining', value: '${(pct * 100).round()}%')),
+                    Expanded(
+                        child: _StatCard(
+                            label: 'Remaining',
+                            value: '${(pct * 100).round()}%')),
                     const SizedBox(width: 8),
-                    Expanded(child: _StatCard(label: 'Schedule', value: device.schedule.label)),
+                    Expanded(
+                        child: _StatCard(
+                            label: 'Schedule', value: device.schedule.label)),
                   ]),
                   const SizedBox(height: 8),
                   Row(children: [
-                    Expanded(child: _StatCard(label: 'Doses left', value: '${device.remainingDoses}/${device.totalDoses}')),
+                    Expanded(
+                        child: _StatCard(
+                            label: 'Doses left',
+                            value:
+                                '${device.remainingDoses}/${device.totalDoses}')),
                     const SizedBox(width: 8),
-                    Expanded(child: _StatCard(label: 'Vendor', value: device.vendor, small: true)),
+                    Expanded(
+                        child: _StatCard(
+                            label: 'Vendor',
+                            value: device.vendor,
+                            small: true)),
                   ]),
                 ])),
               ]),
@@ -199,37 +237,56 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
                 GestureDetector(
                   onTap: () => setState(() => _overriding = !_overriding),
                   child: Row(children: [
-                    Text('DOSE AMOUNT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                        color: context.clrTextSub, letterSpacing: 0.6)),
+                    Text('DOSE AMOUNT',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: context.clrTextSub,
+                            letterSpacing: 0.6)),
                     const SizedBox(width: 6),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
                         color: _overriding ? context.clrAmberBg : context.clrBg,
                         borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: _overriding ? AppColors.amber : context.clrBorder, width: 0.5),
+                        border: Border.all(
+                            color: _overriding
+                                ? AppColors.amber
+                                : context.clrBorder,
+                            width: 0.5),
                       ),
                       child: Text(_overriding ? 'custom' : 'configured',
-                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600,
-                              color: _overriding ? AppColors.amberDark : context.clrTextHint)),
+                          style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: _overriding
+                                  ? AppColors.amberDark
+                                  : context.clrTextHint)),
                     ),
                     const Spacer(),
                     if (!_overriding)
-                      Text('tap to override', style: TextStyle(fontSize: 10, color: context.clrTextHint)),
+                      Text('tap to override',
+                          style: TextStyle(
+                              fontSize: 10, color: context.clrTextHint)),
                   ]),
                 ),
                 const SizedBox(height: 8),
                 Row(children: [
-                  Expanded(child: _DoseField(
+                  Expanded(
+                      child: _DoseField(
                     label: 'mcg',
                     controller: _mcgCtrl,
                     enabled: _overriding,
                   )),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Text('=', style: TextStyle(fontSize: 18, color: context.clrTextHint)),
+                    child: Text('=',
+                        style: TextStyle(
+                            fontSize: 18, color: context.clrTextHint)),
                   ),
-                  Expanded(child: _DoseField(
+                  Expanded(
+                      child: _DoseField(
                     label: 'IU',
                     controller: _iuCtrl,
                     enabled: _overriding,
@@ -238,10 +295,13 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
                 if (_overriding && _isDoseModified) ...[
                   const SizedBox(height: 6),
                   Row(children: [
-                    const Icon(Icons.info_outline_rounded, size: 13, color: AppColors.amber),
+                    const Icon(Icons.info_outline_rounded,
+                        size: 13, color: AppColors.amber),
                     const SizedBox(width: 5),
-                    Text('Dose differs from configured ${device.desiredDoseMcg.toStringAsFixed(0)}mcg',
-                        style: const TextStyle(fontSize: 11, color: AppColors.amberDark)),
+                    Text(
+                        'Dose differs from configured ${device.desiredDoseMcg.toStringAsFixed(0)}mcg',
+                        style: const TextStyle(
+                            fontSize: 11, color: AppColors.amberDark)),
                   ]),
                 ],
                 const SizedBox(height: 16),
@@ -250,68 +310,78 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
               // NFC option
               if (device.nfcTagId != null && widget.onNfcScan != null)
                 GestureDetector(
-                  onTap: () { Navigator.pop(context); widget.onNfcScan!(); },
+                  onTap: () {
+                    Navigator.pop(context);
+                    widget.onNfcScan!();
+                  },
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 12),
                     decoration: BoxDecoration(
                       color: context.clrBlueBg,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: AppColors.blueMid, width: 0.5),
                     ),
                     child: Row(children: [
-                      const Icon(Icons.nfc_rounded, color: AppColors.blue, size: 20),
+                      const Icon(Icons.nfc_rounded,
+                          color: AppColors.blue, size: 20),
                       const SizedBox(width: 10),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        const Text('Log via NFC instead', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.blueDark)),
-                        const Text('Tap to open NFC scanner', style: TextStyle(fontSize: 11, color: AppColors.blue)),
-                      ])),
-                      const Icon(Icons.arrow_forward_ios_rounded, color: AppColors.blue, size: 14),
+                      Expanded(
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                            const Text('Log via NFC instead',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.blueDark)),
+                            const Text('Tap to open NFC scanner',
+                                style: TextStyle(
+                                    fontSize: 11, color: AppColors.blue)),
+                          ])),
+                      const Icon(Icons.arrow_forward_ios_rounded,
+                          color: AppColors.blue, size: 14),
                     ]),
                   ),
                 ),
-              if (device.nfcTagId != null && widget.onNfcScan != null) const SizedBox(height: 14),
+              if (device.nfcTagId != null && widget.onNfcScan != null)
+                const SizedBox(height: 14),
 
               if (depleted) ...[
                 Row(mainAxisAlignment: MainAxisAlignment.center, children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
-                    decoration: BoxDecoration(color: context.clrBorder, borderRadius: BorderRadius.circular(20)),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+                    decoration: BoxDecoration(
+                        color: context.clrBorder,
+                        borderRadius: BorderRadius.circular(20)),
                     child: Text('Depleted — no doses remaining',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.clrTextHint)),
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: context.clrTextHint)),
                   ),
                 ]),
                 const SizedBox(height: 16),
-                SizedBox(width: double.infinity,
-                  child: OutlinedButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))),
+                SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Close'))),
               ] else ...[
                 // Injection site picker
-                Text('INJECTION SITE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700,
-                    color: context.clrTextSub, letterSpacing: 0.6)),
-                const SizedBox(height: 8),
-                SizedBox(
-                  height: 34,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: kInjectionSites.map((site) {
-                      final active = _selectedSite == site;
-                      return GestureDetector(
-                        onTap: () => setState(() => _selectedSite = site),
-                        child: Container(
-                          margin: const EdgeInsets.only(right: 7),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: active ? context.clrTealBg : context.clrBg,
-                            borderRadius: BorderRadius.circular(17),
-                            border: Border.all(color: active ? AppColors.teal : context.clrBorder, width: active ? 1.5 : 0.5),
-                          ),
-                          child: Text(site, style: TextStyle(
-                            fontSize: 12, fontWeight: FontWeight.w500,
-                            color: active ? AppColors.tealDark : context.clrTextSub,
-                          )),
-                        ),
-                      );
-                    }).toList(),
-                  ),
+                Text('INJECTION SITE',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: context.clrTextSub,
+                        letterSpacing: 0.6)),
+                const SizedBox(height: 10),
+                BodySitePicker(
+                  selectedSite: _selectedSite,
+                  recentCounts: siteUsageCounts(
+                      ref.read(doseLogsProvider), widget.device.id),
+                  onChanged: (site) => setState(() => _selectedSite = site),
                 ),
                 const SizedBox(height: 14),
 
@@ -319,21 +389,27 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
                   controller: _notesCtrl,
                   maxLines: 2,
                   style: TextStyle(fontSize: 14, color: context.clrText),
-                  decoration: const InputDecoration(hintText: 'Notes (optional) — side effects, how you felt…'),
+                  decoration: const InputDecoration(
+                      hintText:
+                          'Notes (optional) — side effects, how you felt…'),
                 ),
                 const SizedBox(height: 16),
 
-                SizedBox(width: double.infinity,
+                SizedBox(
+                  width: double.infinity,
                   child: ElevatedButton(
                     onPressed: _confirm,
-                    style: ElevatedButton.styleFrom(backgroundColor: AppColors.teal),
-                    child: const Text('Confirm Dose Logged'),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.teal),
+                    child: const Text('Confirm and log dose'),
                   ),
                 ),
                 const SizedBox(height: 8),
-                Center(child: TextButton(
+                Center(
+                    child: TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: Text('Cancel', style: TextStyle(color: context.clrTextSub)),
+                  child: Text('Cancel',
+                      style: TextStyle(color: context.clrTextSub)),
                 )),
               ],
             ],
@@ -347,61 +423,83 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
 class _StatCard extends StatelessWidget {
   final String label, value;
   final bool small;
-  const _StatCard({required this.label, required this.value, this.small = false});
+  const _StatCard(
+      {required this.label, required this.value, this.small = false});
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-    decoration: BoxDecoration(color: context.clrBg, borderRadius: BorderRadius.circular(8)),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      Text(label, style: TextStyle(fontSize: 10, color: context.clrTextSub), maxLines: 1, overflow: TextOverflow.ellipsis),
-      const SizedBox(height: 3),
-      Text(value, style: TextStyle(fontSize: small ? 11 : 12, fontWeight: FontWeight.w600, color: context.clrText),
-          maxLines: 1, overflow: TextOverflow.ellipsis),
-    ]),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+            color: context.clrBg, borderRadius: BorderRadius.circular(8)),
+        child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label,
+                  style: TextStyle(fontSize: 10, color: context.clrTextSub),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 3),
+              Text(value,
+                  style: TextStyle(
+                      fontSize: small ? 11 : 12,
+                      fontWeight: FontWeight.w600,
+                      color: context.clrText),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
+            ]),
+      );
 }
 
 class _DoseField extends StatelessWidget {
   final String label;
   final TextEditingController controller;
   final bool enabled;
-  const _DoseField({required this.label, required this.controller, required this.enabled});
+  const _DoseField(
+      {required this.label, required this.controller, required this.enabled});
 
   @override
   Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: enabled ? context.clrBg : context.clrSurface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: enabled ? AppColors.teal : context.clrBorder,
-            width: enabled ? 1.5 : 0.5,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: enabled ? context.clrBg : context.clrSurface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: enabled ? AppColors.teal : context.clrBorder,
+                width: enabled ? 1.5 : 0.5,
+              ),
+            ),
+            child: Row(children: [
+              Expanded(
+                  child: TextField(
+                controller: controller,
+                enabled: enabled,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: enabled ? context.clrText : context.clrTextSub,
+                  fontFamily: 'Inter',
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+                decoration: const InputDecoration(
+                  isDense: true,
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              )),
+              Text(label,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: context.clrTextHint,
+                      fontWeight: FontWeight.w600)),
+            ]),
           ),
-        ),
-        child: Row(children: [
-          Expanded(child: TextField(
-            controller: controller,
-            enabled: enabled,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: TextStyle(
-              fontSize: 18, fontWeight: FontWeight.w700,
-              color: enabled ? context.clrText : context.clrTextSub,
-              fontFamily: 'Courier New',
-            ),
-            decoration: const InputDecoration(
-              isDense: true,
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.zero,
-            ),
-          )),
-          Text(label, style: TextStyle(fontSize: 12, color: context.clrTextHint, fontWeight: FontWeight.w600)),
-        ]),
-      ),
-    ],
-  );
+        ],
+      );
 }
