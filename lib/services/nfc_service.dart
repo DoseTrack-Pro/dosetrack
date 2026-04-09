@@ -5,18 +5,27 @@ class NfcService {
   NfcService._();
   static final instance = NfcService._();
 
-  bool _supported = false;
-  bool get isSupported => _supported;
+  NFCAvailability _availability = NFCAvailability.not_supported;
+
+  /// True when the device hardware supports NFC, even if NFC is currently off.
+  bool get isSupported => _availability != NFCAvailability.not_supported;
+
+  /// True only when NFC is currently enabled/available for scanning.
+  bool get isEnabled => _availability == NFCAvailability.available;
 
   Future<void> init() async {
+    await refreshAvailability();
+  }
+
+  Future<NFCAvailability> refreshAvailability() async {
     try {
-      final availability = await FlutterNfcKit.nfcAvailability;
-      _supported = availability == NFCAvailability.available;
-      debugPrint('NFC availability: $availability');
+      _availability = await FlutterNfcKit.nfcAvailability;
+      debugPrint('NFC availability: $_availability');
     } catch (e) {
       debugPrint('NFC init failed: $e');
-      _supported = false;
+      _availability = NFCAvailability.not_supported;
     }
+    return _availability;
   }
 
   // ── Read tag UID ───────────────────────────────────────────
@@ -27,7 +36,13 @@ class NfcService {
     Duration timeout = const Duration(seconds: 10),
     String iosMessage = 'Hold your NFC tag near your phone',
   }) async {
-    if (!_supported) throw Exception('NFC is not supported on this device');
+    final availability = await refreshAvailability();
+    if (availability == NFCAvailability.not_supported) {
+      throw Exception('NFC is not supported on this device');
+    }
+    if (availability == NFCAvailability.disabled) {
+      throw Exception('NFC is turned off. Enable NFC in phone settings.');
+    }
 
     try {
       debugPrint('NFC: polling for tag...');
@@ -44,7 +59,7 @@ class NfcService {
 
       await FlutterNfcKit.finish(iosAlertMessage: 'Tag detected!');
 
-      if (uid == null || uid.isEmpty) return null;
+      if (uid.isEmpty) return null;
       return uid;
     } catch (e) {
       debugPrint('NFC read error: $e');
