@@ -25,7 +25,9 @@
 		<string>$(FLUTTER_BUILD_NUMBER)</string>
 		<!-- NFC — required for App Store review -->
 		<key>NFCReaderUsageDescription</key>
-		<string>Pep Tracker Pro uses NFC to identify your registered peptide containers and log doses automatically.</string>
+		<string>DoseVault Pro uses NFC to scan container tags and log doses.</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>DoseVault Pro may request photo library access if you choose to attach, import, or share images related to your dose records.</string>
 		<key>NSFaceIDUsageDescription</key>
 		<string>Use Face ID to quickly unlock Pep Tracker Pro and keep your data private.</string>
 		<!-- Notifications -->
