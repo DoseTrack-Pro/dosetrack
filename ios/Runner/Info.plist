@@ -28,10 +28,6 @@
 		<string>Pep Tracker Pro uses NFC to identify your registered peptide containers and log doses automatically.</string>
 		<key>NSFaceIDUsageDescription</key>
 		<string>Use Face ID to quickly unlock Pep Tracker Pro and keep your data private.</string>
-		<key>com.apple.developer.nfc.readersession.formats</key>
-		<array>
-			<string>NDEF</string>
-		</array>
 		<!-- Notifications -->
 		<key>UIBackgroundModes</key>
 		<array>
