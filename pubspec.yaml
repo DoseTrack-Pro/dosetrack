@@ -1,7 +1,7 @@
 name: peptidetrack
 description: Personal peptide dosing tracker with NFC auto-logging.
 publish_to: none
-version: 1.0.0+4
+version: 1.0.0+5
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -54,6 +54,8 @@ dev_dependencies:
   flutter_native_splash: ^2.4.7
 
 flutter:
+  config:
+    enable-uiscene-migration: false
   uses-material-design: true
   assets:
     - assets/images/

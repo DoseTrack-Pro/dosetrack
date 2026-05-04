@@ -56,9 +56,10 @@
 				</array>
 			</dict>
 		</array>
-		<!-- Scene lifecycle (iOS 26+). SceneDelegate creates the FlutterEngine + FlutterViewController manually -->
-		<!-- to avoid Flutter framework issue #183900 (ProMotion VSync crash with implicit engine). -->
-		<key>UIApplicationSceneManifest</key>
+		<!-- UIScene lifecycle is intentionally DISABLED (underscore prefix) due to two known Flutter bugs -->
+		<!-- on iOS 26 + ProMotion + Swift plugins (issues #183900, #168228). Use legacy FlutterLaunchEngine. -->
+		<!-- iOS 26 still supports the legacy lifecycle; UIScene only becomes mandatory in iOS 27+. -->
+		<key>_UIApplicationSceneManifest</key>
 		<dict>
 			<key>UIApplicationSupportsMultipleScenes</key>
 			<false/>
@@ -80,6 +81,8 @@
 		<!-- UI -->
 		<key>UILaunchStoryboardName</key>
 		<string>LaunchScreen</string>
+		<key>UIMainStoryboardFile</key>
+		<string>Main</string>
 		<key>UISupportedInterfaceOrientations</key>
 		<array>
 			<string>UIInterfaceOrientationPortrait</string>
