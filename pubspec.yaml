@@ -1,7 +1,7 @@
 name: peptidetrack
 description: Personal peptide dosing tracker with NFC auto-logging.
 publish_to: none
-version: 1.0.0+5
+version: 1.0.0+6
 
 environment:
   sdk: ">=3.3.0 <4.0.0"
@@ -20,9 +20,11 @@ dependencies:
   sqflite: ^2.3.3+1
   path: ^1.9.0
 
-  # NFC
-  flutter_nfc_kit: ^3.4.1
-  ndef: ^0.4.0
+  # NFC: implemented natively in `ios/Runner/NfcReader.swift` and
+  # `android/.../NfcReader.kt`, exposed to Dart via MethodChannel from
+  # `lib/services/nfc_service.dart`. We deliberately do NOT depend on
+  # `flutter_nfc_kit` because its Swift `register(with:)` crashed at launch
+  # on iOS 26 + ProMotion (Flutter framework issues #168228 / #183900).
 
   # Notifications
   flutter_local_notifications: ^21.0.0

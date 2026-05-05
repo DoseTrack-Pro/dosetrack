@@ -7,7 +7,7 @@ A native iOS & Android Flutter app for tracking peptide dosing. Users enroll inj
 - **Framework**: Flutter 3.41 / Dart 3.3+
 - **State**: flutter_riverpod 2.x — use `Notifier<T>` + `NotifierProvider` (NOT the deprecated `StateNotifier`)
 - **Database**: sqflite (SQLite, local-first) — current schema version **5**
-- **NFC**: flutter_nfc_kit — read-only UID approach (we read the tag's hardware UID, never write to it)
+- **NFC**: custom native — Swift (`ios/Runner/NfcReader.swift`, CoreNFC) + Kotlin (`android/.../NfcReader.kt`, NfcAdapter reader mode) wired through a single `MethodChannel('com.adam.dosevault/nfc')` from `lib/services/nfc_service.dart`. Read-only UID approach (we read the tag's hardware UID, never write). We deliberately do NOT depend on `flutter_nfc_kit` — its Swift `register(with:)` crashed at app launch on iOS 26 + ProMotion (Flutter framework issue #168228 / VSync issue #183900) and broke builds 1.0.0 (2)–(5).
 - **Notifications**: flutter_local_notifications v17 — `zonedSchedule()` requires `uiLocalNotificationDateInterpretation` parameter
 - **Charts**: fl_chart
 - **PDF/CSV export**: pdf + printing + share_plus
@@ -165,7 +165,7 @@ blueMid     = Color(0xFFB5D4F4)
 - Analytics bar chart: Remaining = `AppColors.teal`, Used = `Color(0xFF94A3B8)` (slate-gray).
 
 ### Android build config
-- `minSdk 26` (required by flutter_nfc_kit)
+- `minSdk 26` (was originally required by flutter_nfc_kit; we keep it because our `NfcReader.kt` reader-mode flags use API 19+ behaviour and we don't want to think about lower SDK paths)
 - `compileSdk` uses `flutter.compileSdkVersion`
 - Gradle 8.11.1, AGP 8.9.1, Kotlin 2.1.0
 - `coreLibraryDesugaringEnabled true` with `desugar_jdk_libs:2.0.4`
@@ -242,8 +242,9 @@ flutter run -d chrome  # web (NFC/SQLite disabled but UI visible)
 - `withOpacity()` → `withValues(alpha:)` (Flutter 3.41)
 - `StateNotifier` → `Notifier` (Riverpod 2.5)
 - `flutter_local_notifications` v17 still requires `uiLocalNotificationDateInterpretation`
-- `minSdk` must be 26 for flutter_nfc_kit
+- `minSdk` must be 26 (legacy from flutter_nfc_kit era)
 - NFC writes removed — read-only UID approach used instead
+- iOS launch crash on iPhone 17 Pro / iOS 26 with `flutter_nfc_kit` (Flutter framework issue #168228, builds 1.0.0 (2)–(5)) — replaced with custom native NFC (`NfcReader.swift` + `NfcReader.kt` + `MethodChannel`). Plugin registration moved into `RunnerViewController.init(coder:)` so the registrar is guaranteed non-nil for every Swift plugin.
 - All GridView fixed aspect ratio layouts replaced with Row/Column to prevent overflow
 - AGP upgraded to 8.9.1 / Gradle 8.11.1 (required by url_launcher_android 6.3.x → androidx.browser 1.9.0)
 - Archive now zeros `remaining_doses` in both DB and in-memory state
