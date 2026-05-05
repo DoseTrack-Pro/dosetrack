@@ -13,7 +13,7 @@ import UIKit
 /// The storyboard's initial view controller (`Main.storyboard`) points at this
 /// class via `customClass="RunnerViewController"`.
 class RunnerViewController: FlutterViewController {
-  required init?(coder aDecoder: NSCoder) {
+  required init(coder aDecoder: NSCoder) {
     super.init(coder: aDecoder)
     registerNativeIntegrations()
   }
@@ -39,10 +39,10 @@ class RunnerViewController: FlutterViewController {
   private func registerNativeIntegrations() {
     // 1) Standard Flutter plugins. By the time we get here `self.engine` is
     //    a fully constructed `FlutterEngine`, so every plugin's registrar is
-    //    backed by a real binary messenger.
-    if let engine = engine {
-      GeneratedPluginRegistrant.register(with: engine)
-    }
+    //    backed by a real binary messenger. (In Flutter 3.38+ the `engine`
+    //    property on `FlutterViewController` is non-optional, so we pass it
+    //    directly rather than using `if let`.)
+    GeneratedPluginRegistrant.register(with: engine)
 
     // 2) Our native NFC method channel — replaces flutter_nfc_kit on iOS.
     if #available(iOS 13.0, *) {
