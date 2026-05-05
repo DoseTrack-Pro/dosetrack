@@ -7,7 +7,7 @@ A native iOS & Android Flutter app for tracking peptide dosing. Users enroll inj
 - **Framework**: Flutter 3.41 / Dart 3.3+
 - **State**: flutter_riverpod 2.x — use `Notifier<T>` + `NotifierProvider` (NOT the deprecated `StateNotifier`)
 - **Database**: sqflite (SQLite, local-first) — current schema version **5**
-- **NFC**: custom native — Swift (`ios/Runner/NfcReader.swift`, CoreNFC) + Kotlin (`android/.../NfcReader.kt`, NfcAdapter reader mode) wired through a single `MethodChannel('com.adam.dosevault/nfc')` from `lib/services/nfc_service.dart`. Read-only UID approach (we read the tag's hardware UID, never write). We deliberately do NOT depend on `flutter_nfc_kit` — its Swift `register(with:)` crashed at app launch on iOS 26 + ProMotion (Flutter framework issue #168228 / VSync issue #183900) and broke builds 1.0.0 (2)–(5).
+- **NFC**: custom native — Swift (`ios/Runner/NfcReader.swift`, CoreNFC) + Kotlin (`android/.../NfcReader.kt`, NfcAdapter reader mode) wired through a single `MethodChannel('com.adam.dosevault/nfc')` from `lib/services/nfc_service.dart`. Read-only UID approach (we read the tag's hardware UID, never write). We don't depend on `flutter_nfc_kit` (one fewer Swift plugin to babysit through iOS upgrades).
 - **Notifications**: flutter_local_notifications v17 — `zonedSchedule()` requires `uiLocalNotificationDateInterpretation` parameter
 - **Charts**: fl_chart
 - **PDF/CSV export**: pdf + printing + share_plus
@@ -244,7 +244,8 @@ flutter run -d chrome  # web (NFC/SQLite disabled but UI visible)
 - `flutter_local_notifications` v17 still requires `uiLocalNotificationDateInterpretation`
 - `minSdk` must be 26 (legacy from flutter_nfc_kit era)
 - NFC writes removed — read-only UID approach used instead
-- iOS launch crash on iPhone 17 Pro / iOS 26 with `flutter_nfc_kit` (Flutter framework issue #168228, builds 1.0.0 (2)–(5)) — replaced with custom native NFC (`NfcReader.swift` + `NfcReader.kt` + `MethodChannel`). Plugin registration moved into `RunnerViewController.init(coder:)` so the registrar is guaranteed non-nil for every Swift plugin.
+- iOS launch crash on iPhone 17 Pro / iOS 26 (builds 1.0.0 (2)–(6)) — root cause was Codemagic building `flutter build ipa --debug`, which iOS rejects for non-debugger launches. Fix: switch Codemagic workflow to **Release** mode. The `flutter_nfc_kit` and `flutter_secure_storage_darwin` "crashes" we saw were just the alphabetically-first Swift plugin getting a nil registrar from the never-started JIT engine — not a bug in those plugins.
+- We replaced `flutter_nfc_kit` with custom native NFC (`NfcReader.swift` + `NfcReader.kt` + `MethodChannel('com.adam.dosevault/nfc')`) anyway, because removing one Flutter plugin we don't strictly need is one less iOS upgrade we have to babysit. The Dart-side API is unchanged.
 - All GridView fixed aspect ratio layouts replaced with Row/Column to prevent overflow
 - AGP upgraded to 8.9.1 / Gradle 8.11.1 (required by url_launcher_android 6.3.x → androidx.browser 1.9.0)
 - Archive now zeros `remaining_doses` in both DB and in-memory state
