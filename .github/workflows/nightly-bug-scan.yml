@@ -1,0 +1,39 @@
+name: Nightly Bug Scan
+
+on:
+  schedule:
+    # Daily at 03:30 UTC
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  bug-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Cursor SDK
+        run: npm install --no-save @cursor/sdk
+
+      - name: Run nightly bug scan agent
+        env:
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: node .github/scripts/nightly-bug-scan.mjs
+
+      - name: Create issue from scan report
+        if: always()
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "Nightly bug scan - ${{ github.run_id }}"
+          content-filepath: nightly-bug-scan.md
+          labels: nightly-bug-scan, automated
