@@ -12,7 +12,7 @@ Native iOS & Android peptide dosing tracker with NFC auto-logging.
 | State | flutter_riverpod |
 | Navigation | Built-in Navigator (push/pop) + IndexedStack tabs |
 | Database | sqflite (SQLite, local-first) |
-| NFC | flutter_nfc_kit + ndef |
+| NFC | Custom native — Swift CoreNFC (iOS) + Kotlin NfcAdapter (Android), via `MethodChannel('com.adam.dosevault/nfc')` |
 | Notifications | flutter_local_notifications |
 | Charts | fl_chart |
 | PDF | pdf + printing |
@@ -127,7 +127,7 @@ lib/
 │   └── calculations.dart   # Dose math, adherence, streak, date helpers
 ├── services/
 │   ├── database_service.dart     # SQLite CRUD (sqflite)
-│   ├── nfc_service.dart          # NFC read/write (flutter_nfc_kit)
+│   ├── nfc_service.dart          # MethodChannel bridge to native NFC readers
 │   ├── notification_service.dart # Local push scheduling
 │   └── export_service.dart       # CSV + PDF via share sheet
 ├── providers/

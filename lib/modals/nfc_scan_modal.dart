@@ -139,18 +139,43 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
           });
         }
       }
+    } on NfcException catch (e) {
+      _timer?.cancel();
+      if (!mounted) return;
+      debugPrint('NFC scan modal got NfcException: kind=${e.kind} '
+          'code=${e.code} message=${e.message} details=${e.details}');
+      switch (e.kind) {
+        case NfcErrorKind.cancelled:
+          // User dismissed the iOS NFC sheet (or another part of the app
+          // called NfcService.cancel()). Close the modal silently.
+          if (mounted) Navigator.pop(context);
+          return;
+        case NfcErrorKind.timeout:
+          _onTimeout();
+          return;
+        case NfcErrorKind.unavailable:
+          // iOS' radio is busy after a recent session. Show a friendly retry.
+          setState(() {
+            _phase = _Phase.error;
+            _error = 'NFC is busy — wait a second and tap "Try again".';
+          });
+          return;
+        case NfcErrorKind.notSupported:
+        case NfcErrorKind.disabled:
+        case NfcErrorKind.scanFailed:
+          setState(() {
+            _phase = _Phase.error;
+            _error = e.message;
+          });
+          return;
+      }
     } catch (e) {
       _timer?.cancel();
       if (!mounted) return;
-      final msg = e.toString().toLowerCase();
-      if (msg.contains('cancel') || msg.contains('user')) {
-        if (mounted) Navigator.pop(context);
-      } else {
-        setState(() {
-          _phase = _Phase.error;
-          _error = 'Scan failed: $e';
-        });
-      }
+      setState(() {
+        _phase = _Phase.error;
+        _error = 'Scan failed: $e';
+      });
     }
   }
 

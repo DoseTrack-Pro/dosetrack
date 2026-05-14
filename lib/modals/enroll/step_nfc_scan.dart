@@ -126,21 +126,40 @@ class _StepNfcScanState extends State<StepNfcScan>
       });
       await Future.delayed(const Duration(milliseconds: 900));
       if (mounted) widget.onTagWritten(uid);
+    } on NfcException catch (e) {
+      _countdownTimer?.cancel();
+      if (!mounted) return;
+      debugPrint('NFC enroll step got NfcException: kind=${e.kind} '
+          'code=${e.code} message=${e.message} details=${e.details}');
+      switch (e.kind) {
+        case NfcErrorKind.cancelled:
+        case NfcErrorKind.timeout:
+          // Both feel the same from the user's perspective: they need to
+          // try again or skip. Fold into the timeout state.
+          setState(() => _phase = _Phase.timeout);
+          return;
+        case NfcErrorKind.unavailable:
+          setState(() {
+            _phase = _Phase.error;
+            _error = 'NFC is busy — wait a moment and try again.';
+          });
+          return;
+        case NfcErrorKind.notSupported:
+        case NfcErrorKind.disabled:
+        case NfcErrorKind.scanFailed:
+          setState(() {
+            _phase = _Phase.error;
+            _error = e.message;
+          });
+          return;
+      }
     } catch (e) {
       _countdownTimer?.cancel();
       if (!mounted) return;
-
-      final msg = e.toString().toLowerCase();
-      if (msg.contains('cancel') || msg.contains('user')) {
-        setState(() => _phase = _Phase.timeout);
-      } else if (msg.contains('timeout')) {
-        setState(() => _phase = _Phase.timeout);
-      } else {
-        setState(() {
-          _phase = _Phase.error;
-          _error = e.toString().replaceFirst('Exception: ', '');
-        });
-      }
+      setState(() {
+        _phase = _Phase.error;
+        _error = e.toString().replaceFirst('Exception: ', '');
+      });
     }
   }
 

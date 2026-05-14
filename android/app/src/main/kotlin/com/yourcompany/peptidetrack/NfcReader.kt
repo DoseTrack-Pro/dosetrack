@@ -4,10 +4,10 @@ import android.app.Activity
 import android.content.pm.PackageManager
 import android.nfc.NfcAdapter
 import android.nfc.Tag
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -19,6 +19,15 @@ import io.flutter.plugin.common.MethodChannel
  * (read tag UID for inventory matching). Avoids any third-party Flutter NFC
  * plugin so iOS and Android are both backed by code we control.
  *
+ * Error contract — keep these codes in sync with `NfcReader.swift` and
+ * `lib/services/nfc_service.dart`:
+ *   * `not_supported`   — device has no NFC hardware
+ *   * `disabled`        — NFC adapter is turned off
+ *   * `system_busy`     — `poll` called while another session is active
+ *   * `session_cancelled` — `finish` was called before a tag arrived
+ *   * `read_failed`     — tag was detected but had no UID
+ *   * `session_error`   — anything else (reader-mode init failed, etc.)
+ *
  * Channel name MUST match `NfcReader.swift` and `lib/services/nfc_service.dart`.
  */
 class NfcReader(
@@ -26,12 +35,14 @@ class NfcReader(
 ) : MethodChannel.MethodCallHandler, NfcAdapter.ReaderCallback {
 
     companion object {
+        private const val TAG_LOG = "NfcReader"
         private const val CHANNEL_NAME = "com.adam.dosevault/nfc"
 
         fun register(activity: Activity, flutterEngine: FlutterEngine): NfcReader {
             val handler = NfcReader(activity)
             val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_NAME)
             channel.setMethodCallHandler(handler)
+            Log.i(TAG_LOG, "Registered on channel $CHANNEL_NAME")
             return handler
         }
     }
@@ -73,7 +84,8 @@ class NfcReader(
             return
         }
         if (pendingResult != null) {
-            result.error("session_active", "An NFC session is already running.", null)
+            Log.w(TAG_LOG, "poll() rejected: a session is already active.")
+            result.error("system_busy", "An NFC session is already running.", null)
             return
         }
 
@@ -94,9 +106,15 @@ class NfcReader(
 
         try {
             adapter.enableReaderMode(activity, this, flags, extras)
+            Log.i(TAG_LOG, "poll() — reader mode enabled.")
         } catch (e: Throwable) {
+            Log.e(TAG_LOG, "poll() — enableReaderMode threw", e)
             pendingResult = null
-            result.error("session_error", e.localizedMessage ?: "Could not start reader mode.", null)
+            result.error(
+                "session_error",
+                e.localizedMessage ?: "Could not start reader mode.",
+                e.toString()
+            )
         }
     }
 
@@ -119,6 +137,7 @@ class NfcReader(
 
         val uid = tag?.id?.let(::bytesToHex).orEmpty()
         val techList = tag?.techList?.toList().orEmpty()
+        Log.i(TAG_LOG, "Tag detected — uid=$uid techs=$techList")
 
         // Stop reader mode + return on the main thread so the Flutter side stays single-threaded.
         mainHandler.post {
@@ -154,10 +173,5 @@ class NfcReader(
         val sb = StringBuilder(bytes.size * 2)
         for (b in bytes) sb.append(String.format("%02X", b))
         return sb.toString()
-    }
-
-    @Suppress("unused")
-    private fun supportsReaderMode(): Boolean {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT
     }
 }

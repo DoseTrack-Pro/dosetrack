@@ -4,20 +4,30 @@ import UIKit
 
 /// Native iOS NFC reader.
 ///
-/// Replaces `flutter_nfc_kit` on iOS to avoid Flutter framework issue #168228
-/// (`registrar` is nil when Swift plugins register on iOS 26 + ProMotion).
-/// We register this object ourselves from `AppDelegate.application(_:didFinishLaunchingWithOptions:)`,
-/// AFTER `super.application(...)` returns and the engine is fully initialised, so the
-/// `FlutterBinaryMessenger` we pass in is always non-nil.
+/// Replaces `flutter_nfc_kit` on iOS so we own the entire NFC pipeline.
+/// Channel name MUST match `lib/services/nfc_service.dart` and `NfcReader.kt`.
 ///
-/// Channel name MUST match the one in `lib/services/nfc_service.dart`.
+/// Error contract (for the Flutter side to switch on):
+///   * `session_cancelled`   — user tapped Cancel on the system NFC sheet
+///   * `session_timeout`     — iOS' 60s session timer expired
+///   * `session_terminated`  — iOS reported `terminatedUnexpectedly` (202)
+///   * `system_busy`         — iOS reported `systemIsBusy` (203)
+///   * `radio_disabled`      — NFC radio is turned off
+///   * `unsupported_feature` — device doesn't support tag reading
+///   * `security_violation`  — entitlement / signing problem
+///   * `connect_failed`      — detected tag but couldn't connect to it
+///   * `session_error`       — anything else
+///
+/// `details` is always a `[String: Any]` map with the underlying NSError code,
+/// domain, and `localizedDescription` so we can diagnose new failure modes
+/// from the Flutter `debugPrint` logs.
 @available(iOS 13.0, *)
 final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
   static let channelName = "com.adam.dosevault/nfc"
 
   private static var sharedInstance: NfcReader?
 
-  private weak var channel: FlutterMethodChannel?
+  private var channel: FlutterMethodChannel?
   private var session: NFCTagReaderSession?
   private var pendingResult: FlutterResult?
 
@@ -29,8 +39,12 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
     channel.setMethodCallHandler { [weak instance] call, result in
       instance?.handle(call, result: result)
     }
+    // Strong reference: the channel keeps the call handler alive, but we also
+    // need a strong link from the instance back to the channel so it survives
+    // for the lifetime of the app.
     instance.channel = channel
     sharedInstance = instance
+    NSLog("[NfcReader] Registered on channel \(channelName)")
   }
 
   // MARK: - Method handling
@@ -64,7 +78,11 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
       return
     }
     if session != nil {
-      result(FlutterError(code: "session_active",
+      // The previous session is still alive — likely the dashboard scan modal
+      // was just closed and we beat its cleanup. Report as "busy" so the Dart
+      // side can show a retry hint.
+      NSLog("[NfcReader] poll() rejected: a session is already active.")
+      result(FlutterError(code: "system_busy",
                           message: "An NFC session is already running.",
                           details: nil))
       return
@@ -72,16 +90,25 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
 
     pendingResult = result
 
-    // Match flutter_nfc_kit's default polling so we read every tag UID.
+    // Default polling — same coverage as flutter_nfc_kit so existing tags work.
     let pollingOption: NFCTagReaderSession.PollingOption = [.iso14443, .iso15693, .iso18092]
-    let session = NFCTagReaderSession(pollingOption: pollingOption,
-                                      delegate: self,
-                                      queue: nil)
-    if let alertMessage = args["iosAlertMessage"] as? String, !alertMessage.isEmpty {
-      session?.alertMessage = alertMessage
+    guard let newSession = NFCTagReaderSession(pollingOption: pollingOption,
+                                               delegate: self,
+                                               queue: nil) else {
+      NSLog("[NfcReader] NFCTagReaderSession init returned nil.")
+      pendingResult = nil
+      result(FlutterError(code: "session_error",
+                          message: "Could not start an NFC session.",
+                          details: nil))
+      return
     }
-    self.session = session
-    session?.begin()
+
+    if let alertMessage = args["iosAlertMessage"] as? String, !alertMessage.isEmpty {
+      newSession.alertMessage = alertMessage
+    }
+    self.session = newSession
+    NSLog("[NfcReader] poll() — beginning session.")
+    newSession.begin()
   }
 
   private func handleFinish(args: [String: Any], result: @escaping FlutterResult) {
@@ -110,35 +137,28 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
 
   // MARK: - NFCTagReaderSessionDelegate
 
-  func tagReaderSessionDidBecomeActive(_ session: NFCTagReaderSession) {}
+  func tagReaderSessionDidBecomeActive(_ session: NFCTagReaderSession) {
+    NSLog("[NfcReader] Session became active.")
+  }
 
   func tagReaderSession(_ session: NFCTagReaderSession, didInvalidateWithError error: Error) {
+    let nsError = error as NSError
+    NSLog("[NfcReader] Session invalidated: domain=\(nsError.domain) " +
+          "code=\(nsError.code) localized=\(error.localizedDescription)")
+
     defer {
       self.session = nil
       self.pendingResult = nil
     }
     guard let pending = pendingResult else { return }
 
-    if let nfcError = error as? NFCReaderError {
-      switch nfcError.errorCode {
-      case NFCReaderError.Code.readerSessionInvalidationErrorUserCanceled.rawValue:
-        pending(FlutterError(code: "session_cancelled",
-                             message: "User cancelled the NFC session.",
-                             details: nfcError.localizedDescription))
-      case NFCReaderError.Code.readerSessionInvalidationErrorSessionTimeout.rawValue:
-        pending(FlutterError(code: "session_timeout",
-                             message: "NFC session timed out.",
-                             details: nfcError.localizedDescription))
-      default:
-        pending(FlutterError(code: "session_error",
-                             message: "NFC error.",
-                             details: nfcError.localizedDescription))
-      }
-    } else {
-      pending(FlutterError(code: "session_error",
-                           message: "NFC error.",
-                           details: error.localizedDescription))
-    }
+    let (code, message) = Self.mapError(error)
+    let details: [String: Any] = [
+      "errorCode": nsError.code,
+      "errorDomain": nsError.domain,
+      "localizedDescription": error.localizedDescription,
+    ]
+    pending(FlutterError(code: code, message: message, details: details))
   }
 
   func tagReaderSession(_ session: NFCTagReaderSession, didDetect tags: [NFCTag]) {
@@ -149,19 +169,29 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
     session.connect(to: firstTag) { [weak self] error in
       guard let self = self else { return }
       if let error = error {
+        let nsError = error as NSError
+        NSLog("[NfcReader] connect() failed: code=\(nsError.code) " +
+              "localized=\(error.localizedDescription)")
+        let details: [String: Any] = [
+          "errorCode": nsError.code,
+          "errorDomain": nsError.domain,
+          "localizedDescription": error.localizedDescription,
+        ]
         self.pendingResult?(FlutterError(code: "connect_failed",
                                          message: "Could not connect to tag.",
-                                         details: error.localizedDescription))
+                                         details: details))
         self.pendingResult = nil
         session.invalidate(errorMessage: "Could not connect to tag.")
         self.session = nil
         return
       }
 
+      let uid = Self.uidString(for: firstTag)
+      NSLog("[NfcReader] Tag detected — uid=\(uid) type=\(Self.typeString(for: firstTag))")
       let payload: [String: Any] = [
-        "id": NfcReader.uidString(for: firstTag),
-        "type": NfcReader.typeString(for: firstTag),
-        "standard": NfcReader.standardString(for: firstTag),
+        "id": uid,
+        "type": Self.typeString(for: firstTag),
+        "standard": Self.standardString(for: firstTag),
       ]
       self.pendingResult?(payload)
       self.pendingResult = nil
@@ -169,6 +199,40 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
   }
 
   // MARK: - Helpers
+
+  /// Map an iOS `NFCReaderError` to a stable `(code, message)` pair shared
+  /// with the Dart side. Keep these strings in sync with `_exceptionFor` in
+  /// `lib/services/nfc_service.dart` and `NfcReader.kt`.
+  private static func mapError(_ error: Error) -> (String, String) {
+    guard let nfcError = error as? NFCReaderError else {
+      return ("session_error", "NFC error.")
+    }
+    switch nfcError.code {
+    case .readerSessionInvalidationErrorUserCanceled:
+      return ("session_cancelled", "User cancelled the NFC session.")
+    case .readerSessionInvalidationErrorSessionTimeout:
+      return ("session_timeout", "NFC session timed out.")
+    case .readerSessionInvalidationErrorSessionTerminatedUnexpectedly:
+      return ("session_terminated",
+              "NFC session ended unexpectedly. Try again in a moment.")
+    case .readerSessionInvalidationErrorSystemIsBusy:
+      return ("system_busy",
+              "iOS NFC reader is busy. Wait a moment and try again.")
+    case .readerErrorRadioDisabled:
+      return ("radio_disabled", "NFC radio is turned off.")
+    case .readerErrorUnsupportedFeature:
+      return ("unsupported_feature", "This device does not support NFC tag reading.")
+    case .readerErrorSecurityViolation:
+      return ("security_violation",
+              "NFC entitlement / signing issue. Reinstall the app.")
+    case .readerErrorInvalidParameter,
+         .readerErrorInvalidParameterLength,
+         .readerErrorParameterOutOfBound:
+      return ("session_error", "Invalid NFC parameter.")
+    default:
+      return ("session_error", "NFC error.")
+    }
+  }
 
   private static func uidString(for tag: NFCTag) -> String {
     let bytes: Data
