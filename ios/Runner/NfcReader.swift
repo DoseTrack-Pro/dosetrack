@@ -90,8 +90,21 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
 
     pendingResult = result
 
-    // Default polling — same coverage as flutter_nfc_kit so existing tags work.
-    let pollingOption: NFCTagReaderSession.PollingOption = [.iso14443, .iso15693, .iso18092]
+    // Polling options.
+    //
+    // We deliberately exclude `.iso18092` (FeliCa). Adding that option requires
+    // the `com.apple.developer.nfc.readersession.felica.systemcodes` entitlement
+    // — which we don't have, don't need (FeliCa is Japan-only Suica/Pasmo/etc.),
+    // and which our App Store provisioning profile isn't authorised for.
+    //
+    // With `.iso18092` present, iOS rejected `session.begin()` with
+    // NFCError code=2 "Missing required entitlement" within ~1s of opening
+    // the sheet on iOS 26 (builds 1.0.0 (7)–(10)).
+    //
+    // `.iso14443` covers NTAG / MIFARE / ISO 7816 smart cards (the vast majority
+    // of NFC stickers / cards). `.iso15693` covers vicinity tags (ICODE etc).
+    // Together that's every tag the peptide-tracker workflow realistically uses.
+    let pollingOption: NFCTagReaderSession.PollingOption = [.iso14443, .iso15693]
     guard let newSession = NFCTagReaderSession(pollingOption: pollingOption,
                                                delegate: self,
                                                queue: nil) else {
