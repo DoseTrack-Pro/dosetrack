@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../models/device.dart';
 import '../../services/nfc_service.dart';
 import '../../services/database_service.dart';
@@ -36,6 +37,7 @@ class _StepNfcScanState extends State<StepNfcScan>
 
   _Phase _phase = _Phase.scanning;
   String _error = '';
+  String? _errorTech;
   String? _scannedUid;
   NfcMode _detectedMode = NfcMode.tag;
   int _detectedNovoPenDoseCount = 0;
@@ -91,6 +93,7 @@ class _StepNfcScanState extends State<StepNfcScan>
     setState(() {
       _phase = _Phase.scanning;
       _error = '';
+      _errorTech = null;
       _scannedUid = null;
       _detectedMode = NfcMode.tag;
       _detectedNovoPenDoseCount = 0;
@@ -150,6 +153,35 @@ class _StepNfcScanState extends State<StepNfcScan>
           widget.onTagWritten(identifier, detectedMode, 0, false);
         }
       }
+    } on NfcException catch (e) {
+      _countdownTimer?.cancel();
+      if (!mounted) return;
+      debugPrint('NFC enroll step got NfcException: kind=${e.kind} '
+          'code=${e.code} message=${e.message} details=${e.details}');
+      switch (e.kind) {
+        case NfcErrorKind.cancelled:
+        case NfcErrorKind.timeout:
+          // Both feel the same from the user's perspective: they need to
+          // try again or skip. Fold into the timeout state.
+          setState(() => _phase = _Phase.timeout);
+          return;
+        case NfcErrorKind.unavailable:
+          setState(() {
+            _phase = _Phase.error;
+            _error = 'NFC is busy — wait a moment and try again.';
+            _errorTech = _formatErrorTech(e);
+          });
+          return;
+        case NfcErrorKind.notSupported:
+        case NfcErrorKind.disabled:
+        case NfcErrorKind.scanFailed:
+          setState(() {
+            _phase = _Phase.error;
+            _error = e.message;
+            _errorTech = _formatErrorTech(e);
+          });
+          return;
+      }
     } catch (e) {
       _countdownTimer?.cancel();
       if (!mounted) return;
@@ -165,6 +197,7 @@ class _StepNfcScanState extends State<StepNfcScan>
         setState(() {
           _phase = _Phase.error;
           _requiresRescan = true;
+          _errorTech = null;
           _error =
               'Scan was too short. Hold the pen steady near the top of your phone for 1-2 seconds, then rescan.';
         });
@@ -172,9 +205,23 @@ class _StepNfcScanState extends State<StepNfcScan>
         setState(() {
           _phase = _Phase.error;
           _error = e.toString().replaceFirst('Exception: ', '');
+          _errorTech = null;
         });
       }
     }
+  }
+
+  /// Builds a one-line technical string suitable for copy-paste, e.g.
+  /// `[security_violation] Missing required entitlement (code=2 · domain=NFCError)`
+  String _formatErrorTech(NfcException e) {
+    final buf = StringBuffer();
+    if (e.code != null) buf.write('[${e.code}] ');
+    if (e.details != null && e.details!.isNotEmpty) {
+      buf.write(e.details);
+    } else {
+      buf.write(e.message);
+    }
+    return buf.toString();
   }
 
   Color get _timerColor {
@@ -361,6 +408,11 @@ class _StepNfcScanState extends State<StepNfcScan>
           ),
         ],
 
+        if (_phase == _Phase.error && _errorTech != null) ...[
+          const SizedBox(height: 4),
+          _TechDetailsBlock(text: _errorTech!),
+          const SizedBox(height: 16),
+        ],
         if (_phase == _Phase.timeout || _phase == _Phase.error) ...[
           SizedBox(
               width: double.infinity,
@@ -585,6 +637,92 @@ class _DuplicateCard extends StatelessWidget {
               'Scan a different tag, or choose manual tracking.',
               style: const TextStyle(
                   fontSize: 12, color: AppColors.amberDark, height: 1.45),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Technical details block ───────────────────────────────────
+// Renders a copy-to-clipboard panel showing the raw iOS / Android NFC
+// error string. Helps us diagnose entitlement / signing problems without
+// requiring the user to plug their device into a Mac.
+
+class _TechDetailsBlock extends StatefulWidget {
+  final String text;
+  const _TechDetailsBlock({required this.text});
+
+  @override
+  State<_TechDetailsBlock> createState() => _TechDetailsBlockState();
+}
+
+class _TechDetailsBlockState extends State<_TechDetailsBlock> {
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+      decoration: BoxDecoration(
+        color: context.clrBg,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: context.clrBorder, width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('TECHNICAL DETAILS',
+                  style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w700,
+                      color: context.clrTextSub,
+                      letterSpacing: 0.6)),
+              InkWell(
+                onTap: _copy,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(
+                      _copied ? Icons.check_rounded : Icons.copy_rounded,
+                      size: 13,
+                      color: _copied ? AppColors.teal : context.clrTextSub,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(_copied ? 'Copied' : 'Copy',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color:
+                                _copied ? AppColors.teal : context.clrTextSub)),
+                  ]),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SelectableText(
+            widget.text,
+            style: TextStyle(
+              fontSize: 11,
+              color: context.clrText,
+              fontFamily: 'Menlo',
+              height: 1.35,
             ),
           ),
         ],
