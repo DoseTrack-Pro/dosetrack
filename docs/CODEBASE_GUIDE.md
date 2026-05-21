@@ -7,7 +7,7 @@ This guide explains how the app works and what each major file is for, in plain 
 PeptideTrack is a local-first Flutter app for:
 - enrolling peptide containers (pen/vial),
 - tracking planned dosing schedules,
-- logging doses manually or by NFC tag scan,
+- logging doses manually, by NFC tag scan, or via native NovoPen memory import (Android),
 - showing adherence/inventory analytics,
 - exporting and backing up data.
 
@@ -31,7 +31,7 @@ Data is stored locally in SQLite (`sqflite`), state is managed with Riverpod (`N
   - `DoseLog`: one logged dose event.
   - `Protocol`: named stack/cycle with start/end dates, and a device mapping.
 - **Native bridge**: Dart NFC service talks to Android/iOS via MethodChannel `com.adam.dosevault/nfc`.
-- **NovoPen flow**: full native NovoPen decode/import path is currently Android-first; iOS currently supports standard tag UID scanning.
+- **NovoPen flow**: native NovoPen decode/import is Android-first (Echo Plus / NovoPen 6). iOS currently supports standard tag UID scanning; Dart-side APIs and error contracts are kept in parity where possible.
 
 ## 4) File-by-file map (Flutter app code)
 
@@ -69,10 +69,10 @@ Data is stored locally in SQLite (`sqflite`), state is managed with Riverpod (`N
 - `lib/screens/dashboard_screen.dart`: main dashboard (today progress, banners, due chips, protocol sections, device cards, NFC quick-scan).
 - `lib/screens/inventory_screen.dart`: filterable container list (active/depleted/archived/pen/vial).
 - `lib/screens/history_screen.dart`: dose history timeline, summary stats, filters/grouping.
-- `lib/screens/settings_screen.dart`: app settings UI (appearance, notification toggles, NFC behavior, exports, backup/restore, app lock, clear data).
-- `lib/screens/onboarding_screen.dart`: first-run onboarding flow shown before main app.
+- `lib/screens/settings_screen.dart`: app settings UI (appearance, notification toggles, NFC behavior, exports, backup/restore, app lock, legal disclaimer sheet, clear data).
+- `lib/screens/onboarding_screen.dart`: first-run onboarding flow shown before main app (includes NFC/NovoPen overview and privacy-first messaging).
 - `lib/screens/disclaimer_screen.dart`: required first-run legal acknowledgement gate.
-- `lib/screens/analytics_screen.dart`: action-first analytics layout (action needed, KPI summary, consistency calendar, scorecards, inventory outlook, site insight).
+- `lib/screens/analytics_screen.dart`: action-first analytics layout with range selector (`7d`, `14d`, `30d`, `90d`), action needed, KPI summary, consistency calendar, scorecards, inventory outlook, and site insight.
 
 ### Shared constants
 
@@ -81,7 +81,7 @@ Data is stored locally in SQLite (`sqflite`), state is managed with Riverpod (`N
 ### Modals / detail pages
 
 - `lib/modals/log_dose_modal.dart`: manual log confirmation/edit modal with optional dose overrides.
-- `lib/modals/nfc_scan_modal.dart`: active NFC scan modal with timeout, detection state, retry/manual fallback.
+- `lib/modals/nfc_scan_modal.dart`: active NFC scan modal with timeout, detection state, retry/manual fallback, NovoPen-first scan path, and single-dose import site prompt.
 - `lib/modals/device_detail_modal.dart`: full device detail page with metadata and actions.
 - `lib/modals/edit_device_modal.dart`: edit enrolled device settings and schedule details.
 - `lib/modals/dose_detail_modal.dart`: view/edit/delete an individual logged dose.
@@ -92,7 +92,7 @@ Data is stored locally in SQLite (`sqflite`), state is managed with Riverpod (`N
 
 - `lib/modals/enroll/enroll_modal.dart`: multi-step enroll flow container/orchestrator.
 - `lib/modals/enroll/step_type_method.dart`: step 1, choose container type and enrollment method.
-- `lib/modals/enroll/step_nfc_scan.dart`: NFC enrollment scan step, duplicate detection, timeout handling.
+- `lib/modals/enroll/step_nfc_scan.dart`: NFC enrollment scan step with native auto-detect (tag vs NovoPen), duplicate detection, short-scan rescan guard, and NovoPen history import toggle.
 - `lib/modals/enroll/step_compound_details.dart`: compound metadata input step.
 - `lib/modals/enroll/step_dosing_config.dart`: dosing/schedule step, derived dose calculations, day picker/validation.
 
@@ -117,12 +117,12 @@ Data is stored locally in SQLite (`sqflite`), state is managed with Riverpod (`N
 ### Android
 
 - `android/app/src/main/kotlin/com/yourcompany/peptidetrack/MainActivity.kt`: registers native NFC handler with Flutter engine.
-- `android/app/src/main/kotlin/com/yourcompany/peptidetrack/NfcReader.kt`: Android NFC reader-mode implementation; exposes availability/poll/finish plus NovoPen read and enrollment auto-detect methods.
+- `android/app/src/main/kotlin/com/yourcompany/peptidetrack/NfcReader.kt`: Android NFC reader-mode implementation; exposes availability/poll/finish plus NovoPen read and enrollment auto-detect methods, including explicit `incomplete_scan` handling for short pen dwell.
 
 ### iOS
 
 - `ios/Runner/AppDelegate.swift`: app startup plus native NFC channel registration.
-- `ios/Runner/NfcReader.swift`: iOS CoreNFC implementation for availability/poll/finish and tag UID/type extraction (NovoPen-native path pending parity work).
+- `ios/Runner/NfcReader.swift`: iOS CoreNFC implementation for availability/poll/finish and tag UID/type extraction with harmonized error mapping/details for Dart-side handling (NovoPen-native path pending parity work).
 - `ios/Runner/SceneDelegate.swift`: standard Flutter scene delegate for iOS app lifecycle.
 
 ## 6) CI / automation files
