@@ -38,9 +38,18 @@ class ToastOverlay extends ConsumerWidget {
                     const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(message,
-                          style: const TextStyle(color: Colors.white,
-                              fontSize: 13, fontWeight: FontWeight.w500)),
+                      child: Text(
+                        message,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          height: 1.2,
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.none,
+                        ),
+                      ),
                     ),
                     if (showUndo) ...[
                       const SizedBox(width: 12),

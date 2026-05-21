@@ -273,7 +273,7 @@ class _EditDevicePageState extends ConsumerState<EditDevicePage> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),
                       child: Text(
-                        'Use lower than total if this vial was already in progress',
+                        'You can update the total calculated if this vial was already in progress',
                         style: TextStyle(
                           fontSize: 11,
                           color: context.clrTextHint,
@@ -463,7 +463,7 @@ class _EditDevicePageState extends ConsumerState<EditDevicePage> {
                     Padding(
                       padding: const EdgeInsets.only(bottom: 28),
                       child: Row(
-                        children: [10, 20, 30].map((t) {
+                        children: [5, 10, 20].map((t) {
                           final active = _alertPct == t;
                           return Expanded(
                               child: Padding(

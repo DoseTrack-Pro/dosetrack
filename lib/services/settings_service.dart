@@ -57,6 +57,11 @@ class SettingsService {
   Future<void> setOnboardingComplete() =>
       _prefs.setBool('onboardingComplete', true);
 
+  // ── Disclaimer ─────────────────────────────────────────────────
+  bool get disclaimerAccepted => _prefs.getBool('disclaimerAccepted') ?? false;
+  Future<void> setDisclaimerAccepted() =>
+      _prefs.setBool('disclaimerAccepted', true);
+
   // ── App lock / privacy ────────────────────────────────────────
   bool get appLockEnabled => _prefs.getBool('appLockEnabled') ?? false;
   bool get appLockBiometrics => _prefs.getBool('appLockBiometrics') ?? true;
@@ -75,4 +80,23 @@ class SettingsService {
       _prefs.getString('missedAlert_$deviceId');
   Future<void> setLastMissedAlertDate(String deviceId, String dateIso) =>
       _prefs.setString('missedAlert_$deviceId', dateIso);
+
+  // ── NovoPen import progress ───────────────────────────────────
+  int novoPenImportedCount(String deviceId) =>
+      _prefs.getInt('novoPenImportedCount_$deviceId') ?? 0;
+  Future<void> setNovoPenImportedCount(String deviceId, int count) =>
+      _prefs.setInt('novoPenImportedCount_$deviceId', count);
+
+  bool novoPenImportExistingHistory(String deviceId) =>
+      _prefs.getBool('novoPenImportExistingHistory_$deviceId') ?? false;
+  Future<void> setNovoPenImportExistingHistory(String deviceId, bool enabled) =>
+      _prefs.setBool('novoPenImportExistingHistory_$deviceId', enabled);
+
+  int novoPenSerialImportedCount(String serial) =>
+      _prefs.getInt('novoPenSerialImportedCount_${_normalizeSerial(serial)}') ??
+      0;
+  Future<void> setNovoPenSerialImportedCount(String serial, int count) => _prefs
+      .setInt('novoPenSerialImportedCount_${_normalizeSerial(serial)}', count);
+
+  String _normalizeSerial(String serial) => serial.trim().toLowerCase();
 }

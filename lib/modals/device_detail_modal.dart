@@ -53,62 +53,75 @@ class DeviceDetailPage extends ConsumerWidget {
             Container(
               color: context.clrSurface,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              child: Row(
+              child: Column(
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    onPressed: () => Navigator.pop(context),
-                    color: context.clrText,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                      child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                        Text(liveDevice.name,
+                  Row(
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_rounded),
+                        onPressed: () => Navigator.pop(context),
+                        color: context.clrText,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(liveDevice.name,
                             style: TextStyle(
                                 fontSize: 17,
                                 fontWeight: FontWeight.w700,
-                                color: context.clrText)),
-                        Text('${liveDevice.vendor} · ${liveDevice.batchNumber}',
+                                color: context.clrText),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                      // F2: Edit button
+                      TextButton(
+                        onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => EditDevicePage(device: liveDevice),
+                            )),
+                        child: const Text('Edit',
                             style: TextStyle(
-                                fontSize: 12, color: context.clrTextSub)),
-                      ])),
-                  // F2: Edit button
-                  TextButton(
-                    onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => EditDevicePage(device: liveDevice),
-                        )),
-                    child: const Text('Edit',
-                        style: TextStyle(
-                            color: AppColors.teal,
-                            fontWeight: FontWeight.w600)),
+                                color: AppColors.teal,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                      if (!liveDevice.active)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          child: Text('Archived',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color: context.clrTextHint,
+                                  fontWeight: FontWeight.w600)),
+                        )
+                      else
+                        TextButton(
+                          onPressed: () => _archive(context, ref),
+                          child: Text(
+                            liveDevice.type == ContainerType.pen
+                                ? 'Archive Pen'
+                                : 'Archive Vial',
+                            style: const TextStyle(
+                                color: AppColors.red, fontWeight: FontWeight.w600),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                    ],
                   ),
-                  if (!liveDevice.active)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Text('Archived',
-                          style: TextStyle(
-                              fontSize: 13,
-                              color: context.clrTextHint,
-                              fontWeight: FontWeight.w600)),
-                    )
-                  else
-                    TextButton(
-                      onPressed: () => _archive(context, ref),
+                  const SizedBox(height: 2),
+                  Padding(
+                    padding: const EdgeInsets.only(left: 34),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
                       child: Text(
-                        liveDevice.type == ContainerType.pen
-                            ? 'Archive Pen'
-                            : 'Archive Vial',
-                        style: const TextStyle(
-                            color: AppColors.red, fontWeight: FontWeight.w600),
-                        textAlign: TextAlign.center,
+                        '${liveDevice.vendor} · ${liveDevice.batchNumber}',
+                        style: TextStyle(fontSize: 12, color: context.clrTextSub),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                  ),
                 ],
               ),
             ),
@@ -228,6 +241,10 @@ class DeviceDetailPage extends ConsumerWidget {
                             liveDevice.nfcTagId != null
                                 ? 'Enrolled'
                                 : 'Not enrolled'),
+                        if (liveDevice.nfcMode == NfcMode.novoPen) ...[
+                          Divider(height: 0, color: context.clrBorder),
+                          const _MetaRow('NovoPen mode', 'IU is +8% adjusted'),
+                        ],
                         Divider(height: 0, color: context.clrBorder),
                         _MetaRow(
                             'Reconstituted', liveDevice.reconstitutionDate),

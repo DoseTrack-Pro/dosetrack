@@ -9,6 +9,7 @@ import '../services/nfc_service.dart';
 import '../services/database_service.dart';
 import '../services/settings_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/calculations.dart';
 import '../widgets/badge_chip.dart';
 import '../widgets/body_site_picker.dart';
 import '../widgets/dose_ring.dart';
@@ -85,6 +86,28 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
     });
 
     try {
+      final activeNfcDevices = ref
+          .read(activeDevicesProvider)
+          .where((d) => d.active && d.nfcTagId != null)
+          .toList();
+      final hasStandardTagDevices =
+          activeNfcDevices.any((d) => d.nfcMode == NfcMode.tag);
+      final hasNovoPenDevices =
+          activeNfcDevices.any((d) => d.nfcMode == NfcMode.novoPen);
+
+      // Prefer NovoPen path first so Novo scans don't require a second pass.
+      // If Novo read cannot resolve and standard tags exist, fall back to UID scan.
+      if (hasNovoPenDevices) {
+        try {
+          final handled = await _scanNovoPen(
+            allowFallbackToStandard: hasStandardTagDevices,
+          );
+          if (handled) return;
+        } catch (e) {
+          if (!hasStandardTagDevices) rethrow;
+          // Mixed fleet fallback to standard scan.
+        }
+      }
       final tagId = await NfcService.instance.readTagId(
         timeout: Duration(seconds: _maxCountdown),
       );
@@ -100,6 +123,21 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
       if (!mounted) return;
 
       if (device == null) {
+        // In mixed fleets (standard tags + NovoPen), users may scan a NovoPen
+        // while the selector is still on Standard Tag. Try NovoPen path before
+        // declaring the tag unrecognized.
+        if (hasNovoPenDevices) {
+          final handled = await _scanNovoPen(
+            allowFallbackToStandard: hasStandardTagDevices,
+          );
+          if (!handled) {
+            setState(() {
+              _phase = _Phase.error;
+              _error = 'This tag is not registered to any active compound.';
+            });
+          }
+          return;
+        }
         setState(() {
           _phase = _Phase.error;
           _error = 'This tag is not registered to any active compound.';
@@ -145,6 +183,12 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
       final msg = e.toString().toLowerCase();
       if (msg.contains('cancel') || msg.contains('user')) {
         if (mounted) Navigator.pop(context);
+      } else if (msg.contains('transceive') && msg.contains('failed')) {
+        setState(() {
+          _phase = _Phase.error;
+          _error =
+              'Could not read pen memory. Hold the pen steady near the top of your phone and try again.';
+        });
       } else {
         setState(() {
           _phase = _Phase.error;
@@ -152,6 +196,226 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
         });
       }
     }
+  }
+
+  Future<bool> _scanNovoPen({bool allowFallbackToStandard = false}) async {
+    final reading = await NfcService.instance.readNovoPenData(
+      timeout: Duration(seconds: _maxCountdown),
+    );
+    _timer?.cancel();
+    if (!mounted) return true;
+
+    if (reading == null || reading.serial.isEmpty) {
+      if (allowFallbackToStandard) return false;
+      _onTimeout();
+      return true;
+    }
+
+    Device? device;
+    final scannedSerial = reading.serial.trim().toLowerCase();
+    for (final d in ref.read(activeDevicesProvider)) {
+      final enrolledSerial = (d.nfcTagId ?? '').trim().toLowerCase();
+      if (d.nfcMode == NfcMode.novoPen &&
+          enrolledSerial == scannedSerial &&
+          d.active) {
+        device = d;
+        break;
+      }
+    }
+
+    if (device == null) {
+      if (allowFallbackToStandard) return false;
+      setState(() {
+        _phase = _Phase.error;
+        _error = 'NovoPen serial ${reading.serial} is not enrolled.';
+      });
+      return true;
+    }
+
+    final importedLogs = await ref.read(appProvider.notifier).importNovoPenDoses(
+          deviceId: device.id,
+          reading: reading,
+        );
+    if (!mounted) return true;
+    if (importedLogs.isEmpty) {
+      setState(() {
+        _phase = _Phase.error;
+        _error = 'No new doses found in NovoPen memory.';
+      });
+      return true;
+    }
+
+    if (importedLogs.length == 1) {
+      final suggestedSite = _suggestNextSite(device.id);
+      final selectedSite = await _promptNovoPenSingleDoseSite(
+        device: device,
+        importedLog: importedLogs.first,
+        suggestedSite: suggestedSite,
+      );
+      if (!mounted) return true;
+      if (selectedSite != null) {
+        final updated = DoseLog(
+          id: importedLogs.first.id,
+          deviceId: importedLogs.first.deviceId,
+          loggedAt: importedLogs.first.loggedAt,
+          method: importedLogs.first.method,
+          doseMcg: importedLogs.first.doseMcg,
+          doseIu: importedLogs.first.doseIu,
+          notes: importedLogs.first.notes,
+          injectionSite: selectedSite,
+        );
+        await ref.read(appProvider.notifier).updateDoseLog(updated);
+        ref
+            .read(appProvider.notifier)
+            .showToast('Injection site saved for imported dose');
+      }
+    }
+
+    if (!mounted) return true;
+    Navigator.pop(context);
+    return true;
+  }
+
+  Future<String?> _promptNovoPenSingleDoseSite({
+    required Device device,
+    required DoseLog importedLog,
+    required String suggestedSite,
+  }) async {
+    String? selectedSite = suggestedSite;
+    return showModalBottomSheet<String?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.clrSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setLocalState) {
+            final insets = MediaQuery.of(ctx).viewInsets.bottom;
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(16, 14, 16, 16 + insets),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: context.clrBorderStrong,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      '1 new NovoPen dose imported',
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: context.clrText,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Select injection site now or skip and edit later.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 13, color: context.clrTextSub),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Suggested next site: $suggestedSite',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.teal,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: context.clrBg,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: context.clrBorder, width: 0.5),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              formatLogTime(importedLog.loggedAt),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: context.clrTextSub,
+                                fontFamily: 'Inter',
+                                fontFeatures: const [
+                                  FontFeature.tabularFigures()
+                                ],
+                              ),
+                            ),
+                          ),
+                          Text(
+                            '${importedLog.doseIu.toStringAsFixed(1)} IU',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: context.clrText,
+                              fontFamily: 'Inter',
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            '${importedLog.doseMcg.toStringAsFixed(0)} mcg',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: context.clrText,
+                              fontFamily: 'Inter',
+                              fontFeatures: const [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    BodySitePicker(
+                      selectedSite: selectedSite,
+                      recentCounts:
+                          siteUsageCounts(ref.read(doseLogsProvider), device.id),
+                      onChanged: (site) => setLocalState(() => selectedSite = site),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(ctx, null),
+                            child: const Text('Skip for now'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: selectedSite == null
+                                ? null
+                                : () => Navigator.pop(ctx, selectedSite),
+                            child: const Text('Save site'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _onTimeout() {
@@ -230,11 +494,10 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
 
   @override
   Widget build(BuildContext context) {
-    final nfcDevices = ref
+    final allNfcDevices = ref
         .watch(activeDevicesProvider)
         .where((d) => d.nfcTagId != null)
         .toList();
-
     return Container(
       decoration: BoxDecoration(
         color: context.clrSurface,
@@ -256,11 +519,11 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
                         color: context.clrBorderStrong,
                         borderRadius: BorderRadius.circular(2))),
                 const SizedBox(height: 20),
-                if (_phase == _Phase.scanning) _buildScanning(nfcDevices),
+                if (_phase == _Phase.scanning) _buildScanning(allNfcDevices),
                 if (_phase == _Phase.detected && _detected != null)
                   _buildDetected(),
                 if (_phase == _Phase.timeout || _phase == _Phase.error)
-                  _buildTimeout(nfcDevices),
+                  _buildTimeout(allNfcDevices),
               ],
             ),
           ),
@@ -272,6 +535,7 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
   // ── Scanning state ─────────────────────────────────────────
 
   Widget _buildScanning(List<Device> nfcDevices) {
+    final labelDevices = nfcDevices;
     final timerColor = _countdown > (_maxCountdown * 0.5).round()
         ? AppColors.teal
         : _countdown > (_maxCountdown * 0.2).round()
@@ -280,13 +544,14 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
 
     return Column(
       children: [
-        Text('Scanning for NFC Tag',
+        Text('Scanning for NFC Device',
             style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
                 color: context.clrText)),
         const SizedBox(height: 6),
-        Text('Hold any registered compound near the top of your phone',
+        Text(
+            'Hold your registered NFC tag or NovoPen near the top of your phone.\nNovoPen dose imports are auto-adjusted by +8%.',
             textAlign: TextAlign.center,
             style: TextStyle(
                 fontSize: 14, color: context.clrTextSub, height: 1.4)),
@@ -330,16 +595,14 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
                             fontWeight: FontWeight.w700,
                             color: Colors.white,
                             fontFamily: 'Inter',
-                            fontFeatures: const [
-                              FontFeature.tabularFigures()
-                            ]))),
+                            fontFeatures: [FontFeature.tabularFigures()]))),
               ),
             ],
           ),
         ),
         const SizedBox(height: 24),
 
-        if (nfcDevices.isNotEmpty) ...[
+        if (labelDevices.isNotEmpty) ...[
           Align(
               alignment: Alignment.centerLeft,
               child: Text('LISTENING FOR',
@@ -349,7 +612,7 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
                       color: context.clrTextSub,
                       letterSpacing: 0.6))),
           const SizedBox(height: 8),
-          ...nfcDevices.map((d) => Container(
+          ...labelDevices.map((d) => Container(
                 margin: const EdgeInsets.only(bottom: 6),
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
@@ -371,13 +634,19 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
                               fontWeight: FontWeight.w600,
                               color: context.clrText))),
                   BadgeChip(
-                    label: d.type.name.toUpperCase(),
-                    bg: d.type == ContainerType.pen
-                        ? context.clrPurpleBg
-                        : context.clrTealBg,
-                    fg: d.type == ContainerType.pen
-                        ? AppColors.purpleDark
-                        : AppColors.tealDark,
+                    label: d.nfcMode == NfcMode.novoPen
+                        ? 'NOVOPEN'
+                        : d.type.name.toUpperCase(),
+                    bg: d.nfcMode == NfcMode.novoPen
+                        ? context.clrBlueBg
+                        : (d.type == ContainerType.pen
+                            ? context.clrPurpleBg
+                            : context.clrTealBg),
+                    fg: d.nfcMode == NfcMode.novoPen
+                        ? AppColors.blueDark
+                        : (d.type == ContainerType.pen
+                            ? AppColors.purpleDark
+                            : AppColors.tealDark),
                   ),
                 ]),
               )),
@@ -476,15 +745,14 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: AppColors.amber, width: 0.5),
             ),
-            child: Row(children: [
-              const Icon(Icons.warning_amber_rounded,
+            child: const Row(children: [
+              Icon(Icons.warning_amber_rounded,
                   color: AppColors.amber, size: 18),
-              const SizedBox(width: 8),
+              SizedBox(width: 8),
               Expanded(
                   child: Text(
                       'Already logged today — you can log again if needed',
-                      style: const TextStyle(
-                          fontSize: 12, color: AppColors.amber))),
+                      style: TextStyle(fontSize: 12, color: AppColors.amber))),
             ]),
           ),
           const SizedBox(height: 12),
@@ -562,6 +830,11 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
   // ── Timeout / error state ──────────────────────────────────
 
   Widget _buildTimeout(List<Device> nfcDevices) {
+    final title = _phase == _Phase.error
+        ? (_error.contains('No new doses found')
+            ? 'No New Doses'
+            : 'Tag Not Recognized')
+        : 'No Tag Detected';
     return Column(
       children: [
         Container(
@@ -573,7 +846,7 @@ class _NfcScanModalState extends ConsumerState<NfcScanModal>
               color: AppColors.red, size: 36),
         ),
         const SizedBox(height: 14),
-        Text(_phase == _Phase.error ? 'Tag Not Recognized' : 'No Tag Detected',
+        Text(title,
             style: TextStyle(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,

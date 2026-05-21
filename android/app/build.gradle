@@ -47,4 +47,6 @@ flutter {
 dependencies {
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.4"
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:$kotlin_version"
+    implementation "net.cacheux.nvplib:nvplib-core:0.1.2"
+    implementation "net.cacheux.nvplib:nvplib-nfc:0.1.2"
 }

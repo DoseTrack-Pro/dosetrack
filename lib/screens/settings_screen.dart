@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
+import '../constants/legal_text.dart';
 import '../providers/app_state.dart';
 import '../models/device.dart';
 import '../models/dose_log.dart';
@@ -261,17 +263,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ]),
                   const SizedBox(height: 20),
 
-                  // Inventory
-                  const _Section(title: 'Inventory Thresholds', children: [
-                    _InfoRow(
-                        label: 'Low stock alerts',
-                        value: 'Enabled above in Notifications'),
-                    _InfoRow(
-                        label: 'Low stock threshold',
-                        value: 'Set per compound'),
-                  ]),
-                  const SizedBox(height: 20),
-
                   // Data
                   _Section(title: 'Data & Export', children: [
                     _ActionRow(
@@ -284,12 +275,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         onTap: _exportPdf),
                     _ActionRow(
                         label: 'Backup data (JSON)',
-                        subtitle: 'Export all data for safekeeping',
+                        subtitle: 'Create a .json backup file you can save',
                         onTap: _backupJson),
                     _ActionRow(
                         label: 'Restore from backup',
-                        subtitle: 'Pick a JSON backup file to restore',
+                        subtitle: 'Import from a previously saved .json file',
                         onTap: _pickAndRestore),
+                    const _InfoRow(
+                        label: 'Backup includes',
+                        value:
+                            'Compounds, dose logs, protocols, and protocol links'),
+                    const _InfoRow(
+                        label: 'Not included in backup',
+                        value:
+                            'App settings (theme/NFC/alerts), app lock PIN, and OS permissions'),
+                  ]),
+                  const SizedBox(height: 20),
+
+                  // Legal
+                  _Section(title: 'Legal', children: [
+                    _ActionRow(
+                      label: 'Disclaimer',
+                      subtitle:
+                          'Educational/informational only. Not medical advice.',
+                      onTap: _showDisclaimerSheet,
+                    ),
                   ]),
                   const SizedBox(height: 20),
 
@@ -346,7 +356,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         'deviceProtocols': state.deviceProtocols,
       };
       final json = const JsonEncoder.withIndent('  ').convert(data);
-      await Share.share(json, subject: 'Pep Tracker Pro Backup');
+      final now = DateTime.now();
+      String two(int v) => v.toString().padLeft(2, '0');
+      final fileName =
+          'peptidetrack_backup_${now.year}${two(now.month)}${two(now.day)}_${two(now.hour)}${two(now.minute)}${two(now.second)}.json';
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [
+            XFile.fromData(
+              Uint8List.fromList(utf8.encode(json)),
+              mimeType: 'application/json',
+            ),
+          ],
+          fileNameOverrides: [fileName],
+          subject: 'Pep Tracker Pro Backup',
+          text: 'Backup file: $fileName',
+        ),
+      );
     } catch (e) {
       if (mounted) _showError('Backup failed: $e');
     }
@@ -463,6 +490,73 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  void _showDisclaimerSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.clrSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: context.clrBorderStrong,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Legal Disclaimer',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: context.clrText,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.45,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Text(
+                      kLegalDisclaimerText,
+                      style: TextStyle(
+                        fontSize: 14,
+                        height: 1.5,
+                        color: context.clrTextSub,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -630,16 +724,28 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-        child: Row(children: [
-          Expanded(
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w500,
-                      color: context.clrText))),
-          Text(value,
-              style: TextStyle(fontSize: 13, color: context.clrTextSub)),
-        ]),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: context.clrText,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 13,
+                color: context.clrTextSub,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
       );
 }
 

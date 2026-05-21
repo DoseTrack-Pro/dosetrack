@@ -28,6 +28,7 @@ class StepDosingConfig extends StatefulWidget {
   final List<int>? initialScheduleDays;
   final int initialAlertPct;
   final int? initialStartingRemainingDoses;
+  final NfcMode nfcMode;
 
   const StepDosingConfig({
     super.key,
@@ -38,11 +39,12 @@ class StepDosingConfig extends StatefulWidget {
     this.initialMcg = 0,
     this.initialIsBlend = false,
     this.initialBlendComponents,
-    this.initialSchedule = DoseSchedule.dailyAm,
+    this.initialSchedule = DoseSchedule.daily,
     this.initialStartDate = '',
     this.initialScheduleDays,
-    this.initialAlertPct = 20,
+    this.initialAlertPct = 10,
     this.initialStartingRemainingDoses,
+    this.nfcMode = NfcMode.tag,
   });
 
   @override
@@ -134,7 +136,9 @@ class _StepDosingConfigState extends State<StepDosingConfig> {
         final mg = double.tryParse(row.mg.text.trim()) ?? 0;
         return sum + (mg > 0 ? mg : 0);
       });
-  double get _iu => calcDoseIu(_mg, _ml, _mcg);
+  double get _iu => widget.nfcMode == NfcMode.novoPen
+      ? calcNovoPenAdjustedDoseIu(_mg, _ml, _mcg)
+      : calcDoseIu(_mg, _ml, _mcg);
   int get _total => calcTotalDoses(_ml, _iu);
   int get _startingRemaining => int.tryParse(_startingRemainingCtrl.text) ?? 0;
 
@@ -142,11 +146,13 @@ class _StepDosingConfigState extends State<StepDosingConfig> {
     final mg = double.tryParse(_mgCtrl.text) ?? 0;
     final ml = double.tryParse(_mlCtrl.text) ?? 0;
     final mcg = double.tryParse(_mcgCtrl.text) ?? 0;
-    final iu = calcDoseIu(mg, ml, mcg);
+    final iu = widget.nfcMode == NfcMode.novoPen
+        ? calcNovoPenAdjustedDoseIu(mg, ml, mcg)
+        : calcDoseIu(mg, ml, mcg);
     return calcTotalDoses(ml, iu);
   }
 
-  void _onDoseInputsChanged(_) {
+  void _onDoseInputsChanged(String _) {
     setState(() {
       if (_isBlend) {
         _syncBlendTotalToMg();
@@ -484,6 +490,27 @@ class _StepDosingConfigState extends State<StepDosingConfig> {
             controller: _mcgCtrl,
             onChanged: _onDoseInputsChanged,
           ),
+          if (widget.nfcMode == NfcMode.novoPen) ...[
+            const SizedBox(height: 4),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: context.clrBlueBg,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.blue, width: 0.5),
+              ),
+              child: Text(
+                'NovoPen mode: displayed IU is pre-adjusted for +8% cartridge overdelivery.',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: context.clrText,
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
 
           if (_isBlend && _mcg > 0 && _blendTotalMg > 0) ...[
             Container(
@@ -537,7 +564,7 @@ class _StepDosingConfigState extends State<StepDosingConfig> {
             label: 'Starting doses remaining',
             hint: _total > 0 ? 'e.g. $_total' : 'e.g. 10',
             subtitle:
-                'Use lower than total if this vial was already in progress',
+                'You can update the total calculated if this vial was already in progress',
             controller: _startingRemainingCtrl,
             keyboardType: TextInputType.number,
             validator: (v) {
@@ -607,7 +634,13 @@ class _StepDosingConfigState extends State<StepDosingConfig> {
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: DoseSchedule.values.map((s) {
+            children: const [
+              DoseSchedule.daily,
+              DoseSchedule.everyOtherDay,
+              DoseSchedule.onceWeekly,
+              DoseSchedule.twiceWeekly,
+              DoseSchedule.custom,
+            ].map((s) {
               final active = _schedule == s;
               return GestureDetector(
                 onTap: () => setState(() {
@@ -731,7 +764,7 @@ class _StepDosingConfigState extends State<StepDosingConfig> {
                   letterSpacing: 0.2)),
           const SizedBox(height: 8),
           Row(
-            children: [10, 20, 30].map((t) {
+            children: [5, 10, 20].map((t) {
               final active = _alertPct == t;
               return Expanded(
                   child: Padding(

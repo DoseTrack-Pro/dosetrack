@@ -49,14 +49,19 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
           children: [
             Container(
               color: context.clrSurface,
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
-              child: Row(children: [
-                Text('History',
-                    style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
-                        color: context.clrText)),
-              ]),
+              padding: const EdgeInsets.fromLTRB(20, 14, 20, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(children: [
+                    Text('History',
+                        style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w700,
+                            color: context.clrText)),
+                  ]),
+                ],
+              ),
             ),
             // Compound filter chips
             if (loggedDevices.length > 1)
@@ -122,6 +127,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                             final device = devices
                                 .where((d) => d.id == log.deviceId)
                                 .firstOrNull;
+                            final displayNote = _formatHistoryNote(log.notes);
                             final color = device != null
                                 ? doseColor(
                                     device.remainingDoses, device.totalDoses)
@@ -186,9 +192,9 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                                                           .ellipsis)),
                                             ],
                                           ]),
-                                          if (log.notes != null) ...[
+                                          if (displayNote != null) ...[
                                             const SizedBox(height: 3),
-                                            Text(log.notes!,
+                                            Text(displayNote,
                                                 style: TextStyle(
                                                     fontSize: 12,
                                                     color: context.clrTextSub,
@@ -243,6 +249,26 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
       ),
     );
   }
+
+  String? _formatHistoryNote(String? raw) {
+    if (raw == null) return null;
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+    // Canonical display for NovoPen imports.
+    final v = trimmed.toLowerCase();
+    if (v.contains('imported from') &&
+        v.contains('novopen') &&
+        v.contains('auto-adjusted +8%')) {
+      final serialMatch = RegExp(r'\(([^)]+)\)').firstMatch(trimmed);
+      final serial = serialMatch?.group(1)?.trim();
+      if (serial != null && serial.isNotEmpty) {
+        return 'Imported from NovoPen ($serial); auto-adjusted +8%';
+      }
+      return 'Imported from NovoPen; auto-adjusted +8%';
+    }
+    return trimmed;
+  }
+
 }
 
 class _FilterChip extends StatelessWidget {
@@ -302,7 +328,7 @@ class _SummaryCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                         color: context.clrText,
                         fontFamily: 'Inter',
-                        fontFeatures: [FontFeature.tabularFigures()]))),
+                        fontFeatures: const [FontFeature.tabularFigures()]))),
             const SizedBox(height: 3),
             Text(label,
                 style: TextStyle(fontSize: 11, color: context.clrTextSub),

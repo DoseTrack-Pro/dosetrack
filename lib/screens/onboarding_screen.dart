@@ -22,12 +22,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     _OnboardingPage(
       icon: Icons.nfc_rounded,
       title: 'NFC-First Logging',
-      body: 'Attach an inexpensive NFC sticker to each compound. Tap your phone to the tag to log doses in seconds — no menus needed.',
+      body:
+          'Use NFC your way: attach NFC tag to any pen or vial for quick tap-to-log, or use native support for NovoPen Echo Plus and NovoPen 6 to read built-in NFC dose history directly from the pen.',
     ),
     _OnboardingPage(
       icon: Icons.bar_chart_rounded,
       title: 'Track & Analyze',
       body: 'See adherence, streaks, injection site rotation, and projected depletion dates — everything you need to stay consistent.',
+    ),
+    _OnboardingPage(
+      icon: Icons.shield_rounded,
+      title: 'Privacy First',
+      body:
+          'Privacy by design: your data stays on your device. This app does not use cloud storage, so your compounds, logs, and analytics remain local and under your control.',
     ),
     _OnboardingPage(
       icon: Icons.check_circle_outline_rounded,
@@ -120,29 +127,53 @@ class _OnboardingPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 40),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 100, height: 100,
-            decoration: BoxDecoration(color: context.clrTealBg, shape: BoxShape.circle),
-            child: Icon(icon, color: AppColors.teal, size: 48),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isLandscape =
+            MediaQuery.of(context).orientation == Orientation.landscape;
+        final horizontalPadding = isLandscape ? 20.0 : 40.0;
+        final iconSize = isLandscape ? 72.0 : 100.0;
+        final glyphSize = isLandscape ? 36.0 : 48.0;
+        final titleSize = isLandscape ? 18.0 : 24.0;
+        final bodySize = isLandscape ? 14.0 : 16.0;
+
+        return SingleChildScrollView(
+          padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: iconSize,
+                  height: iconSize,
+                  decoration:
+                      BoxDecoration(color: context.clrTealBg, shape: BoxShape.circle),
+                  child: Icon(icon, color: AppColors.teal, size: glyphSize),
+                ),
+                SizedBox(height: isLandscape ? 18 : 36),
+                Text(
+                  title,
+                  style: TextStyle(
+                      fontSize: titleSize,
+                      fontWeight: FontWeight.w700,
+                      color: context.clrText,
+                      letterSpacing: -0.5),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  body,
+                  style: TextStyle(
+                      fontSize: bodySize, color: context.clrTextSub, height: 1.5),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 36),
-          Text(title,
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700,
-                color: context.clrText, letterSpacing: -0.5),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          Text(body,
-            style: TextStyle(fontSize: 16, color: context.clrTextSub, height: 1.6),
-            textAlign: TextAlign.center,
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

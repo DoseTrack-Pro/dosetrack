@@ -90,8 +90,7 @@ class NotificationService {
 
     try {
       switch (device.schedule) {
-        case DoseSchedule.dailyAm:
-        case DoseSchedule.dailyPm:
+        case DoseSchedule.daily:
           final id = _reminderIdFor(device.id, 0);
           await _zonedScheduleWithFallback(
             id: id,

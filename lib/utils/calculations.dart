@@ -3,6 +3,7 @@ import '../models/device.dart';
 import '../models/dose_log.dart';
 
 // ── Dose math ──────────────────────────────────────────────────
+const novoPenOverdoseFactor = 1.08;
 
 /// dose (IU) = (desiredMcg / (peptideMg × 1000)) × reconMl × 100
 double calcDoseIu(
@@ -10,6 +11,19 @@ double calcDoseIu(
   if (peptideMg <= 0) return 0;
   return ((desiredDoseMcg / (peptideMg * 1000)) * reconVolumeMl * 100)
       .roundToDouble();
+}
+
+/// NovoPen adjustment:
+/// user-entered desiredDoseMcg is the intended delivered dose, while NovoPen
+/// with standard 3mL cartridges tends to deliver ~8% extra.
+/// We therefore reduce the configured IU target by that factor.
+double calcNovoPenAdjustedDoseIu(
+  double peptideMg,
+  double reconVolumeMl,
+  double desiredDoseMcg,
+) {
+  final adjustedTargetMcg = desiredDoseMcg / novoPenOverdoseFactor;
+  return calcDoseIu(peptideMg, reconVolumeMl, adjustedTargetMcg);
 }
 
 /// Reverse of calcDoseIu — derives mcg from a known IU volume.
@@ -36,8 +50,7 @@ double calcReconVolume(
 
 // ── Schedule helpers ───────────────────────────────────────────
 
-int scheduleHour(DoseSchedule schedule) =>
-    schedule == DoseSchedule.dailyPm ? 18 : 8;
+int scheduleHour(DoseSchedule schedule) => 8;
 
 /// Returns the effective scheduled weekdays for a device.
 /// For twiceWeekly defaults to [1, 4] (Mon, Thu).
@@ -76,8 +89,7 @@ bool isScheduledOnDate(Device device, DateTime date) {
   if (scheduleDate.isBefore(startDate)) return false;
 
   switch (device.schedule) {
-    case DoseSchedule.dailyAm:
-    case DoseSchedule.dailyPm:
+    case DoseSchedule.daily:
       return true;
     case DoseSchedule.everyOtherDay:
       return scheduleDate.difference(startDate).inDays % 2 == 0;
@@ -249,8 +261,7 @@ DateTime? calcProjectedDepletion(Device device, List<DoseLog> logs) {
     dosesPerDay = deviceLogs.length / daysSinceFirst;
   } else {
     switch (device.schedule) {
-      case DoseSchedule.dailyAm:
-      case DoseSchedule.dailyPm:
+      case DoseSchedule.daily:
         dosesPerDay = 1.0;
       case DoseSchedule.everyOtherDay:
         dosesPerDay = 0.5;

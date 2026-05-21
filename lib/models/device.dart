@@ -2,9 +2,10 @@ import 'dart:convert';
 
 enum ContainerType { pen, vial }
 
+enum NfcMode { tag, novoPen }
+
 enum DoseSchedule {
-  dailyAm,
-  dailyPm,
+  daily,
   everyOtherDay,
   twiceWeekly,
   onceWeekly,
@@ -14,10 +15,8 @@ enum DoseSchedule {
 extension DoseScheduleLabel on DoseSchedule {
   String get label {
     switch (this) {
-      case DoseSchedule.dailyAm:
-        return 'Daily AM';
-      case DoseSchedule.dailyPm:
-        return 'Daily PM';
+      case DoseSchedule.daily:
+        return 'Daily';
       case DoseSchedule.everyOtherDay:
         return 'Every Other Day';
       case DoseSchedule.twiceWeekly:
@@ -31,10 +30,8 @@ extension DoseScheduleLabel on DoseSchedule {
 
   String get value {
     switch (this) {
-      case DoseSchedule.dailyAm:
-        return 'daily_am';
-      case DoseSchedule.dailyPm:
-        return 'daily_pm';
+      case DoseSchedule.daily:
+        return 'daily';
       case DoseSchedule.everyOtherDay:
         return 'every_other_day';
       case DoseSchedule.twiceWeekly:
@@ -47,9 +44,11 @@ extension DoseScheduleLabel on DoseSchedule {
   }
 
   static DoseSchedule fromValue(String v) {
+    // Backward compatibility: map legacy persisted values into new single Daily mode.
+    if (v == 'daily_am' || v == 'daily_pm') return DoseSchedule.daily;
     return DoseSchedule.values.firstWhere(
       (s) => s.value == v,
-      orElse: () => DoseSchedule.dailyAm,
+      orElse: () => DoseSchedule.daily,
     );
   }
 }
@@ -80,6 +79,7 @@ class Device {
   final bool isBlend;
   final List<BlendComponent>? blendComponents;
   final String? nfcTagId;
+  final NfcMode nfcMode;
   final int alertThresholdPct;
   final String? notificationId;
   final bool active;
@@ -106,6 +106,7 @@ class Device {
     this.isBlend = false,
     this.blendComponents,
     this.nfcTagId,
+    this.nfcMode = NfcMode.tag,
     required this.alertThresholdPct,
     this.notificationId,
     required this.active,
@@ -138,6 +139,7 @@ class Device {
     List<BlendComponent>? blendComponents,
     bool clearBlendComponents = false,
     String? nfcTagId,
+    NfcMode? nfcMode,
     int? alertThresholdPct,
     String? notificationId,
     bool clearNotificationId = false,
@@ -170,6 +172,7 @@ class Device {
           ? null
           : (blendComponents ?? this.blendComponents),
       nfcTagId: nfcTagId ?? this.nfcTagId,
+      nfcMode: nfcMode ?? this.nfcMode,
       alertThresholdPct: alertThresholdPct ?? this.alertThresholdPct,
       notificationId:
           clearNotificationId ? null : (notificationId ?? this.notificationId),
@@ -201,6 +204,7 @@ class Device {
             ? jsonEncode(blendComponents!.map((c) => c.toMap()).toList())
             : null,
         'nfc_tag_id': nfcTagId,
+        'nfc_mode': nfcMode.name,
         'alert_threshold_pct': alertThresholdPct,
         'notification_id': notificationId,
         'active': active ? 1 : 0,
@@ -232,6 +236,10 @@ class Device {
         isBlend: (m['is_blend'] as int?) == 1,
         blendComponents: _parseBlendComponents(m['blend_components_json']),
         nfcTagId: m['nfc_tag_id'] as String?,
+        nfcMode: NfcMode.values.firstWhere(
+          (v) => v.name == (m['nfc_mode'] as String? ?? NfcMode.tag.name),
+          orElse: () => NfcMode.tag,
+        ),
         alertThresholdPct: m['alert_threshold_pct'] as int,
         notificationId: m['notification_id'] as String?,
         active: (m['active'] as int) == 1,

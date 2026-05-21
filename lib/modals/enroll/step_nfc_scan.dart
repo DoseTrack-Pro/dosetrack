@@ -12,7 +12,12 @@ import '../../widgets/badge_chip.dart';
 enum _Phase { scanning, success, timeout, error, duplicate }
 
 class StepNfcScan extends StatefulWidget {
-  final void Function(String tagId) onTagWritten;
+  final void Function(
+    String tagId,
+    NfcMode nfcMode,
+    int novoPenBaselineCount,
+    bool importExistingHistory,
+  ) onTagWritten;
   final VoidCallback onSkip;
 
   const StepNfcScan({
@@ -32,6 +37,10 @@ class _StepNfcScanState extends State<StepNfcScan>
   _Phase _phase = _Phase.scanning;
   String _error = '';
   String? _scannedUid;
+  NfcMode _detectedMode = NfcMode.tag;
+  int _detectedNovoPenDoseCount = 0;
+  bool _importExistingHistory = false;
+  bool _requiresRescan = false;
   int _countdown = _totalSeconds;
   Timer? _countdownTimer;
 
@@ -83,29 +92,36 @@ class _StepNfcScanState extends State<StepNfcScan>
       _phase = _Phase.scanning;
       _error = '';
       _scannedUid = null;
+      _detectedMode = NfcMode.tag;
+      _detectedNovoPenDoseCount = 0;
+      _importExistingHistory = false;
+      _requiresRescan = false;
       _conflictDevice = null;
       _countdown = _totalSeconds;
     });
     _startCountdown();
 
     try {
-      final uid = await NfcService.instance.readTagId(
+      final result = await NfcService.instance.scanForEnrollment(
         timeout: const Duration(seconds: _totalSeconds),
         iosMessage: 'Hold your NFC tag near the top of your phone',
       );
+      final identifier = result?.id;
+      final detectedMode = result?.mode ?? NfcMode.tag;
+      final detectedDoseCount = result?.novoPenDoseCount ?? 0;
 
       _countdownTimer?.cancel();
       if (!mounted) return;
 
-      if (uid == null || uid.isEmpty) {
+      if (identifier == null || identifier.isEmpty) {
         setState(() => _phase = _Phase.timeout);
         return;
       }
 
       // ── Uniqueness check ─────────────────────────────────────
       // Look for any active, non-depleted container already using this tag.
-      final conflict =
-          await DatabaseService.instance.getConflictingDeviceByNfcTagId(uid);
+      final conflict = await DatabaseService.instance
+          .getConflictingDeviceByNfcTagId(identifier);
 
       if (!mounted) return;
 
@@ -113,7 +129,8 @@ class _StepNfcScanState extends State<StepNfcScan>
         // Tag is in use — show the duplicate state
         setState(() {
           _phase = _Phase.duplicate;
-          _scannedUid = uid;
+          _scannedUid = identifier;
+          _detectedMode = detectedMode;
           _conflictDevice = conflict;
         });
         return;
@@ -122,10 +139,17 @@ class _StepNfcScanState extends State<StepNfcScan>
       // Tag is free — proceed
       setState(() {
         _phase = _Phase.success;
-        _scannedUid = uid;
+        _scannedUid = identifier;
+        _detectedMode = detectedMode;
+        _detectedNovoPenDoseCount =
+            detectedMode == NfcMode.novoPen ? detectedDoseCount : 0;
       });
-      await Future.delayed(const Duration(milliseconds: 900));
-      if (mounted) widget.onTagWritten(uid);
+      if (detectedMode == NfcMode.tag) {
+        await Future.delayed(const Duration(milliseconds: 900));
+        if (mounted) {
+          widget.onTagWritten(identifier, detectedMode, 0, false);
+        }
+      }
     } catch (e) {
       _countdownTimer?.cancel();
       if (!mounted) return;
@@ -135,6 +159,15 @@ class _StepNfcScanState extends State<StepNfcScan>
         setState(() => _phase = _Phase.timeout);
       } else if (msg.contains('timeout')) {
         setState(() => _phase = _Phase.timeout);
+      } else if (msg.contains('scan was too short') ||
+          msg.contains('transceive failed') ||
+          msg.contains('tag was lost')) {
+        setState(() {
+          _phase = _Phase.error;
+          _requiresRescan = true;
+          _error =
+              'Scan was too short. Hold the pen steady near the top of your phone for 1-2 seconds, then rescan.';
+        });
       } else {
         setState(() {
           _phase = _Phase.error;
@@ -225,12 +258,62 @@ class _StepNfcScanState extends State<StepNfcScan>
 
         // UID on success
         if (_phase == _Phase.success && _scannedUid != null)
-          Text('UID: $_scannedUid',
+          Text(
+              '${_detectedMode == NfcMode.novoPen ? 'Serial' : 'UID'}: $_scannedUid',
               style: TextStyle(
                   fontSize: 11,
                   color: context.clrTextHint,
                   fontFamily: 'Inter',
-                  fontFeatures: [FontFeature.tabularFigures()])),
+                  fontFeatures: const [FontFeature.tabularFigures()])),
+
+        if (_phase == _Phase.success && _detectedMode == NfcMode.novoPen) ...[
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: context.clrBg,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: context.clrBorder, width: 0.5),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Found ${_detectedNovoPenDoseCount.toString()} dose record(s) in this pen.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: context.clrText,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _importExistingHistory
+                      ? 'Existing pen history will be imported after enrollment.'
+                      : 'Start from now is enabled (recommended): existing pen history will be ignored.',
+                  style: TextStyle(fontSize: 12, color: context.clrTextSub),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  value: _importExistingHistory,
+                  title: Text(
+                    'Import existing pen history',
+                    style: TextStyle(fontSize: 13, color: context.clrText),
+                  ),
+                  subtitle: Text(
+                    'Turn on only if you want to backfill older doses.',
+                    style: TextStyle(fontSize: 12, color: context.clrTextSub),
+                  ),
+                  onChanged: (value) =>
+                      setState(() => _importExistingHistory = value),
+                ),
+              ],
+            ),
+          ),
+        ],
 
         const SizedBox(height: 24),
 
@@ -248,17 +331,49 @@ class _StepNfcScanState extends State<StepNfcScan>
             ),
           ),
 
+        if (_phase == _Phase.success && _detectedMode == NfcMode.novoPen) ...[
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _scannedUid == null
+                  ? null
+                  : () {
+                      final baselineCount = _importExistingHistory
+                          ? 0
+                          : _detectedNovoPenDoseCount;
+                      widget.onTagWritten(
+                        _scannedUid!,
+                        _detectedMode,
+                        baselineCount,
+                        _importExistingHistory,
+                      );
+                    },
+              child: const Text('Continue with NovoPen'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton(
+              onPressed: _startScan,
+              child: const Text('Scan again'),
+            ),
+          ),
+        ],
+
         if (_phase == _Phase.timeout || _phase == _Phase.error) ...[
           SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                   onPressed: _startScan, child: const Text('Try again'))),
-          const SizedBox(height: 10),
-          SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                  onPressed: widget.onSkip,
-                  child: const Text('Continue without NFC'))),
+          if (!_requiresRescan) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                    onPressed: widget.onSkip,
+                    child: const Text('Continue without NFC'))),
+          ],
         ],
 
         if (_phase == _Phase.duplicate) ...[
@@ -288,9 +403,11 @@ class _StepNfcScanState extends State<StepNfcScan>
   String get _phaseTitle {
     switch (_phase) {
       case _Phase.scanning:
-        return 'Scan NFC Tag';
+        return 'Scan NFC Device';
       case _Phase.success:
-        return 'Tag Detected!';
+        return _detectedMode == NfcMode.novoPen
+            ? 'NovoPen Detected!'
+            : 'Tag Detected!';
       case _Phase.timeout:
         return 'No Tag Detected';
       case _Phase.error:
@@ -303,8 +420,11 @@ class _StepNfcScanState extends State<StepNfcScan>
   String get _phaseSubtitle {
     switch (_phase) {
       case _Phase.scanning:
-        return 'Hold any NFC tag flat against the\ntop-back of your phone';
+        return 'Hold your NFC tag or NovoPen near the top-back of your phone.\nWe will detect the type automatically.';
       case _Phase.success:
+        if (_detectedMode == NfcMode.novoPen) {
+          return 'Dose history will be read directly from your pen.\nFor standard 3mL cartridges, NovoPen often delivers slightly more than the dialed amount, so doses are automatically corrected by +8% for more accurate tracking.';
+        }
         return 'Tag registered successfully';
       case _Phase.timeout:
         return 'No tag was found in time.\nMake sure NFC is enabled and try again.';
@@ -381,13 +501,13 @@ class _DuplicateCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Warning header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(14, 12, 14, 8),
             child: Row(children: [
-              const Icon(Icons.warning_amber_rounded,
+              Icon(Icons.warning_amber_rounded,
                   color: AppColors.amber, size: 18),
-              const SizedBox(width: 8),
-              const Expanded(
+              SizedBox(width: 8),
+              Expanded(
                 child: Text(
                   'This tag is linked to an active compound',
                   style: TextStyle(

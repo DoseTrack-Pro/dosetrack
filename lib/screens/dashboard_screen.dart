@@ -557,11 +557,17 @@ class _ProtocolSection extends StatelessWidget {
               child: Row(children: [
                 Expanded(
                     child: Row(children: [
-                  Text(protocol.name,
+                  Expanded(
+                    child: Text(
+                      protocol.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
-                          color: AppColors.tealDark)),
+                          color: AppColors.tealDark),
+                    ),
+                  ),
                   const SizedBox(width: 8),
                   Container(
                     padding:
@@ -821,7 +827,8 @@ class _NfcScanButton extends StatelessWidget {
                           fontWeight: FontWeight.w700,
                           color: Colors.white)),
                   SizedBox(height: 2),
-                  Text('Hold compound near phone to record dose',
+                  Text(
+                      'Tap to start scanner, then hold tag or NovoPen near your phone NFC reader',
                       style: TextStyle(fontSize: 12, color: Color(0xBFFFFFFF))),
                 ])),
             const Icon(Icons.chevron_right_rounded, color: Color(0xBFFFFFFF)),

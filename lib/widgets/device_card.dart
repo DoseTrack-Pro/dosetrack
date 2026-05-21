@@ -105,6 +105,11 @@ class DeviceCard extends StatelessWidget {
                                 label: 'NFC',
                                 bg: context.clrBlueBg,
                                 fg: AppColors.blueDark),
+                          if (device.nfcMode == NfcMode.novoPen)
+                            BadgeChip(
+                                label: 'NOVOPEN-ADJUSTED',
+                                bg: context.clrBlueBg,
+                                fg: AppColors.blueDark),
                           if (device.active) ..._expiryBadge(device),
                           // "Dosed today" indicator
                           if (dosedToday && !depleted)

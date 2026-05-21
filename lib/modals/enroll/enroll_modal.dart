@@ -21,6 +21,7 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
 
   ContainerType _type = ContainerType.pen;
   bool _useNfc = true;
+  NfcMode _nfcMode = NfcMode.tag;
   String? _nfcTagId;
   String _name = '',
       _vendor = '',
@@ -31,11 +32,13 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
   bool _isBlend = false;
   List<BlendComponent>? _blendComponents;
   int _expiryDays = 30;
-  DoseSchedule _schedule = DoseSchedule.dailyAm;
+  DoseSchedule _schedule = DoseSchedule.daily;
   String _scheduleStartDate = '';
   List<int>? _scheduleDays;
-  int _alertPct = 20;
+  int _alertPct = 10;
   int? _startingRemainingDoses;
+  int _novoPenBaselineCount = 0;
+  bool _novoPenImportExistingHistory = false;
 
   bool get _isNfcFlow => _useNfc;
   int get _totalSteps => _isNfcFlow ? 4 : 3;
@@ -81,6 +84,9 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
             startingRemainingDoses: _startingRemainingDoses,
             expiryDays: _expiryDays,
             nfcTagId: _nfcTagId,
+            nfcMode: _nfcMode,
+            novoPenBaselineCount: _novoPenBaselineCount,
+            novoPenImportExistingHistory: _novoPenImportExistingHistory,
           );
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -187,6 +193,9 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
         previousDevices: ref.watch(devicesProvider),
         onCopyPrevious: (d) => setState(() {
           _type = d.type;
+          _useNfc = d.nfcTagId != null;
+          _nfcMode = d.nfcMode;
+          _nfcTagId = d.nfcTagId;
           _name = d.name;
           _vendor = d.vendor;
           _peptideMg = d.peptideMg;
@@ -206,6 +215,9 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
           setState(() {
             _type = type;
             _useNfc = useNfc;
+            _nfcMode = NfcMode.tag;
+            _novoPenBaselineCount = 0;
+            _novoPenImportExistingHistory = false;
           });
           if (!useNfc) {
             setState(() => _step = 2);
@@ -218,14 +230,22 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
 
     if (_step == 1 && _isNfcFlow) {
       return StepNfcScan(
-        onTagWritten: (tagId) {
-          setState(() => _nfcTagId = tagId);
+        onTagWritten:
+            (tagId, detectedMode, novoPenBaselineCount, importExistingHistory) {
+          setState(() {
+            _nfcTagId = tagId;
+            _nfcMode = detectedMode;
+            _novoPenBaselineCount = novoPenBaselineCount;
+            _novoPenImportExistingHistory = importExistingHistory;
+          });
           _next();
         },
         onSkip: () {
           setState(() {
             _useNfc = false;
             _nfcTagId = null;
+            _novoPenBaselineCount = 0;
+            _novoPenImportExistingHistory = false;
             _step = 2;
           });
         },
@@ -258,6 +278,7 @@ class _EnrollModalState extends ConsumerState<EnrollModal> {
       initialMg: _peptideMg,
       initialMl: _reconMl,
       initialMcg: _desiredMcg,
+      nfcMode: _nfcMode,
       initialIsBlend: _isBlend,
       initialBlendComponents: _blendComponents,
       initialSchedule: _schedule,

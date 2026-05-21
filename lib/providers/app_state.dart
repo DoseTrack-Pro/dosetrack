@@ -6,6 +6,7 @@ import '../models/dose_log.dart';
 import '../models/protocol.dart';
 import '../services/database_service.dart';
 import '../services/notification_service.dart';
+import '../services/nfc_service.dart';
 import '../services/settings_service.dart';
 import '../utils/calculations.dart';
 
@@ -55,6 +56,7 @@ class AppState {
 
 class AppNotifier extends Notifier<AppState> {
   static const _uuid = Uuid();
+  static const _novoPenDoseAdjustmentFactor = 1.08;
 
   @override
   AppState build() => const AppState();
@@ -128,8 +130,13 @@ class AppNotifier extends Notifier<AppState> {
     int? startingRemainingDoses,
     int expiryDays = 30,
     String? nfcTagId,
+    NfcMode nfcMode = NfcMode.tag,
+    int novoPenBaselineCount = 0,
+    bool novoPenImportExistingHistory = false,
   }) async {
-    final doseVolumeIu = calcDoseIu(peptideMg, reconVolumeMl, desiredDoseMcg);
+    final doseVolumeIu = nfcMode == NfcMode.novoPen
+        ? calcNovoPenAdjustedDoseIu(peptideMg, reconVolumeMl, desiredDoseMcg)
+        : calcDoseIu(peptideMg, reconVolumeMl, desiredDoseMcg);
     final totalDoses = calcTotalDoses(reconVolumeMl, doseVolumeIu);
     final seededRemaining = startingRemainingDoses ?? totalDoses;
     final remainingDoses =
@@ -160,6 +167,7 @@ class AppNotifier extends Notifier<AppState> {
       scheduleDays: scheduleDays,
       expiryDays: expiryDays,
       nfcTagId: nfcTagId,
+      nfcMode: nfcMode,
       alertThresholdPct: alertThresholdPct,
       active: true,
       createdAt: DateTime.now(),
@@ -176,8 +184,137 @@ class AppNotifier extends Notifier<AppState> {
     }
 
     await DatabaseService.instance.insertDevice(device);
+    if (nfcMode == NfcMode.novoPen && nfcTagId != null && nfcTagId.isNotEmpty) {
+      await SettingsService.instance
+          .setNovoPenImportExistingHistory(id, novoPenImportExistingHistory);
+
+      final baseline = novoPenImportExistingHistory
+          ? 0
+          : novoPenBaselineCount.clamp(0, 1000000).toInt();
+      await SettingsService.instance.setNovoPenImportedCount(id, baseline);
+
+      if (!novoPenImportExistingHistory) {
+        final serialCursor =
+            SettingsService.instance.novoPenSerialImportedCount(nfcTagId);
+        final nextSerialCursor =
+            baseline > serialCursor ? baseline : serialCursor;
+        await SettingsService.instance
+            .setNovoPenSerialImportedCount(nfcTagId, nextSerialCursor);
+      }
+    }
     state = state.copyWith(devices: [device, ...state.devices]);
     showToast('${device.name} enrolled successfully');
+  }
+
+  Future<List<DoseLog>> importNovoPenDoses({
+    required String deviceId,
+    required NovoPenReading reading,
+  }) async {
+    final device = state.devices.firstWhere((d) => d.id == deviceId);
+    if (device.remainingDoses <= 0) return const [];
+
+    int remaining = device.remainingDoses;
+    final imported = <DoseLog>[];
+
+    final allDoses = List<NovoPenDose>.from(reading.doses);
+    final totalDoseCount = allDoses.length;
+    final importExistingHistory =
+        SettingsService.instance.novoPenImportExistingHistory(deviceId);
+    var previousImportedCount =
+        SettingsService.instance.novoPenImportedCount(deviceId);
+    final serialImportedCount =
+        SettingsService.instance.novoPenSerialImportedCount(reading.serial);
+
+    if (previousImportedCount == 0 && !importExistingHistory) {
+      final historicalImports = state.doseLogs
+          .where((l) => l.deviceId == deviceId && _isNovoPenImportNote(l.notes))
+          .length;
+      if (historicalImports > 0) {
+        previousImportedCount =
+            historicalImports.clamp(0, totalDoseCount).toInt();
+      }
+    }
+
+    final baselineSource = importExistingHistory
+        ? previousImportedCount
+        : (previousImportedCount > serialImportedCount
+            ? previousImportedCount
+            : serialImportedCount);
+    final clampedPrevious = baselineSource > totalDoseCount
+        ? 0
+        : baselineSource.clamp(0, totalDoseCount).toInt();
+    // NovoPen dose list is newest-first. Import only the newly-added head items.
+    final newDoseCount =
+        (totalDoseCount - clampedPrevious).clamp(0, totalDoseCount);
+    final candidateDoses = allDoses.take(newDoseCount.toInt()).toList();
+
+    int consumed = 0;
+    final importTimestamp = DateTime.now();
+    for (final dose in candidateDoses) {
+      if (remaining <= 0) break;
+      consumed += 1;
+
+      final doseIu = dose.units / 10.0;
+      final doseMcg =
+          calcDoseMcg(device.peptideMg, device.reconVolumeMl, doseIu) *
+              _novoPenDoseAdjustmentFactor;
+      final log = DoseLog(
+        id: _uuid.v4(),
+        deviceId: deviceId,
+        loggedAt: importTimestamp,
+        method: LogMethod.nfc,
+        doseMcg: doseMcg,
+        doseIu: doseIu,
+        notes: 'Imported from NovoPen (${reading.serial}); auto-adjusted +8%',
+      );
+
+      await DatabaseService.instance.insertDoseLog(log);
+      imported.add(log);
+      remaining -= 1;
+    }
+
+    final nextImportedCount =
+        (clampedPrevious + consumed).clamp(0, totalDoseCount);
+    await SettingsService.instance
+        .setNovoPenImportedCount(deviceId, nextImportedCount.toInt());
+    final nextSerialImportedCount =
+        serialImportedCount > nextImportedCount.toInt()
+            ? serialImportedCount
+            : nextImportedCount.toInt();
+    await SettingsService.instance
+        .setNovoPenSerialImportedCount(reading.serial, nextSerialImportedCount);
+
+    if (imported.isEmpty) return const [];
+
+    await DatabaseService.instance.updateRemainingDoses(deviceId, remaining);
+    final updatedDevice = device.copyWith(remainingDoses: remaining);
+
+    state = state.copyWith(
+      doseLogs: [...imported, ...state.doseLogs],
+      devices: state.devices
+          .map((d) => d.id == deviceId ? updatedDevice : d)
+          .toList(),
+      undoLogId: imported.last.id,
+    );
+
+    final pct = (remaining / device.totalDoses) * 100;
+    if (pct <= device.alertThresholdPct &&
+        pct > 0 &&
+        SettingsService.instance.lowInventoryAlerts) {
+      try {
+        await NotificationService.instance.showLowStockAlert(updatedDevice);
+      } catch (_) {}
+    }
+    if (remaining == 0) {
+      try {
+        await NotificationService.instance.showDepletionAlert(updatedDevice);
+      } catch (_) {}
+    }
+
+    showToast(
+      'Imported ${imported.length} dose(s) from ${reading.model} (+8% adjusted)',
+    );
+    return imported;
   }
 
   // ── Log dose ───────────────────────────────────────────────
@@ -194,12 +331,13 @@ class AppNotifier extends Notifier<AppState> {
     if (device.remainingDoses <= 0) return;
 
     final newRemaining = device.remainingDoses - 1;
+    final baseDoseMcg = overrideDoseMcg ?? device.desiredDoseMcg;
     final log = DoseLog(
       id: _uuid.v4(),
       deviceId: deviceId,
       loggedAt: DateTime.now(),
       method: method,
-      doseMcg: overrideDoseMcg ?? device.desiredDoseMcg,
+      doseMcg: baseDoseMcg,
       doseIu: overrideDoseIu ?? device.doseVolumeIu,
       notes: notes?.trim().isEmpty == true ? null : notes?.trim(),
       injectionSite: injectionSite,
@@ -464,6 +602,14 @@ class AppNotifier extends Notifier<AppState> {
 
   void clearToast() {
     state = state.copyWith(clearToast: true, clearUndo: true);
+  }
+
+  bool _isNovoPenImportNote(String? note) {
+    if (note == null) return false;
+    final v = note.toLowerCase();
+    return v.contains('imported from') &&
+        v.contains('novopen') &&
+        v.contains('auto-adjusted +8%');
   }
 }
 

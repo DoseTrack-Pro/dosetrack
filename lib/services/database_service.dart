@@ -18,7 +18,7 @@ class DatabaseService {
     final dbPath = await getDatabasesPath();
     _db = await openDatabase(
       join(dbPath, 'peptidetrack.db'),
-      version: 7,
+      version: 8,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -47,7 +47,8 @@ class DatabaseService {
         is_blend INTEGER NOT NULL DEFAULT 0,
         blend_components_json TEXT,
         nfc_tag_id TEXT,
-        alert_threshold_pct INTEGER NOT NULL DEFAULT 20,
+        nfc_mode TEXT NOT NULL DEFAULT 'tag',
+        alert_threshold_pct INTEGER NOT NULL DEFAULT 10,
         notification_id TEXT,
         active INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL
@@ -132,6 +133,10 @@ class DatabaseService {
     if (oldVersion < 7) {
       await db
           .execute('ALTER TABLE devices ADD COLUMN schedule_start_date TEXT');
+    }
+    if (oldVersion < 8) {
+      await db.execute(
+          "ALTER TABLE devices ADD COLUMN nfc_mode TEXT NOT NULL DEFAULT 'tag'");
     }
   }
 
