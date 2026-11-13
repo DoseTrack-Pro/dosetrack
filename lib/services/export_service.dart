@@ -49,7 +49,7 @@ class ExportService {
     final dir = await getTemporaryDirectory();
     final file = File('${dir.path}/PepTrackerPro_$stamp.csv');
     await file.writeAsString(buf.toString());
-    await Share.shareXFiles([XFile(file.path)], text: 'Pep Tracker Pro data export');
+    await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], text: 'Pep Tracker Pro data export'));
   }
 
   String _esc(String s) {
@@ -191,6 +191,6 @@ class ExportService {
     final dir = await getTemporaryDirectory();
     final file = File('${dir.path}/PepTrackerPro_$stamp.pdf');
     await file.writeAsBytes(await pdf.save());
-    await Share.shareXFiles([XFile(file.path)], text: 'Pep Tracker Pro report');
+    await SharePlus.instance.share(ShareParams(files: [XFile(file.path)], text: 'Pep Tracker Pro report'));
   }
 }
