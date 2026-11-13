@@ -25,11 +25,18 @@ import UIKit
 final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
   static let channelName = "com.adam.dosevault/nfc"
 
+  private enum PendingOperation {
+    case tagUid
+    case novoPenData
+    case enrollmentAutoDetect
+  }
+
   private static var sharedInstance: NfcReader?
 
   private var channel: FlutterMethodChannel?
   private var session: NFCTagReaderSession?
   private var pendingResult: FlutterResult?
+  private var pendingOperation: PendingOperation?
 
   /// Register the channel with the given messenger. Idempotent.
   static func register(with messenger: FlutterBinaryMessenger) {
@@ -55,6 +62,10 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
       handleAvailability(result: result)
     case "poll":
       handlePoll(args: call.arguments as? [String: Any] ?? [:], result: result)
+    case "readNovoPenData":
+      handleNovoPenRead(result: result)
+    case "scanForEnrollment":
+      handleEnrollmentScan(args: call.arguments as? [String: Any] ?? [:], result: result)
     case "finish":
       handleFinish(args: call.arguments as? [String: Any] ?? [:], result: result)
     default:
@@ -71,6 +82,34 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
   }
 
   private func handlePoll(args: [String: Any], result: @escaping FlutterResult) {
+    startSession(
+      operation: .tagUid,
+      args: args,
+      result: result
+    )
+  }
+
+  private func handleNovoPenRead(result: @escaping FlutterResult) {
+    startSession(
+      operation: .novoPenData,
+      args: [:],
+      result: result
+    )
+  }
+
+  private func handleEnrollmentScan(args: [String: Any], result: @escaping FlutterResult) {
+    startSession(
+      operation: .enrollmentAutoDetect,
+      args: args,
+      result: result
+    )
+  }
+
+  private func startSession(
+    operation: PendingOperation,
+    args: [String: Any],
+    result: @escaping FlutterResult
+  ) {
     guard NFCTagReaderSession.readingAvailable else {
       result(FlutterError(code: "not_supported",
                           message: "NFC is not supported on this device.",
@@ -89,6 +128,7 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
     }
 
     pendingResult = result
+    pendingOperation = operation
 
     // Polling options.
     //
@@ -145,6 +185,7 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
                            details: nil))
       pendingResult = nil
     }
+    pendingOperation = nil
     result(nil)
   }
 
@@ -162,6 +203,7 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
     defer {
       self.session = nil
       self.pendingResult = nil
+      self.pendingOperation = nil
     }
     guard let pending = pendingResult else { return }
 
@@ -179,6 +221,11 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
       session.restartPolling()
       return
     }
+    guard let op = pendingOperation else {
+      session.invalidate(errorMessage: "No pending NFC operation.")
+      self.session = nil
+      return
+    }
     session.connect(to: firstTag) { [weak self] error in
       guard let self = self else { return }
       if let error = error {
@@ -190,28 +237,146 @@ final class NfcReader: NSObject, NFCTagReaderSessionDelegate {
           "errorDomain": nsError.domain,
           "localizedDescription": error.localizedDescription,
         ]
-        self.pendingResult?(FlutterError(code: "connect_failed",
-                                         message: "Could not connect to tag.",
-                                         details: details))
+        let message = error.localizedDescription.lowercased()
+        let likelyIncomplete = op != .tagUid &&
+          (message.contains("lost") ||
+           message.contains("disconnect") ||
+           message.contains("connection") ||
+           message.contains("timeout"))
+        if likelyIncomplete {
+          self.pendingResult?(FlutterError(
+            code: "incomplete_scan",
+            message: "Scan was too short. Hold the pen steady for 1-2 seconds and rescan.",
+            details: details
+          ))
+        } else {
+          self.pendingResult?(FlutterError(code: "connect_failed",
+                                           message: "Could not connect to tag.",
+                                           details: details))
+        }
         self.pendingResult = nil
+        self.pendingOperation = nil
         session.invalidate(errorMessage: "Could not connect to tag.")
         self.session = nil
         return
       }
 
-      let uid = Self.uidString(for: firstTag)
-      NSLog("[NfcReader] Tag detected — uid=\(uid) type=\(Self.typeString(for: firstTag))")
-      let payload: [String: Any] = [
-        "id": uid,
-        "type": Self.typeString(for: firstTag),
-        "standard": Self.standardString(for: firstTag),
-      ]
-      self.pendingResult?(payload)
+      do {
+        let payload: [String: Any]
+        switch op {
+        case .tagUid:
+          let uid = Self.uidString(for: firstTag)
+          NSLog("[NfcReader] Tag detected — uid=\(uid) type=\(Self.typeString(for: firstTag))")
+          payload = [
+            "id": uid,
+            "type": Self.typeString(for: firstTag),
+            "standard": Self.standardString(for: firstTag),
+          ]
+        case .novoPenData:
+          payload = try self.readNovoPenPayload(from: firstTag)
+        case .enrollmentAutoDetect:
+          payload = try self.readEnrollmentPayload(from: firstTag)
+        }
+        self.pendingResult?(payload)
+      } catch {
+        let nsError = error as NSError
+        let details: [String: Any] = [
+          "errorCode": nsError.code,
+          "errorDomain": nsError.domain,
+          "localizedDescription": error.localizedDescription,
+        ]
+        if nsError.domain == "NfcReader" && nsError.code == 1001 {
+          self.pendingResult?(FlutterError(
+            code: "incomplete_scan",
+            message: "Scan was too short. Hold the pen steady for 1-2 seconds and rescan.",
+            details: details
+          ))
+        } else if nsError.domain == "NfcReader" && nsError.code == 1002 {
+          self.pendingResult?(FlutterError(
+            code: "read_failed",
+            message: error.localizedDescription,
+            details: details
+          ))
+        } else {
+          self.pendingResult?(FlutterError(
+            code: "session_error",
+            message: error.localizedDescription,
+            details: details
+          ))
+        }
+      }
       self.pendingResult = nil
+      self.pendingOperation = nil
     }
   }
 
   // MARK: - Helpers
+
+  private func readEnrollmentPayload(from tag: NFCTag) throws -> [String: Any] {
+    // Option A scaffold: try NovoPen protocol first when we have ISO 7816.
+    // If protocol read fails with a likely short dwell, force rescan.
+    // Otherwise, gracefully fall back to standard UID enrollment.
+    if case .iso7816 = tag {
+      do {
+        let novo = try readNovoPenPayload(from: tag)
+        let serial = (novo["serial"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !serial.isEmpty {
+          let doseCount = (novo["doses"] as? [[String: Any]])?.count ?? 0
+          return [
+            "mode": "novo_pen",
+            "id": serial,
+            "model": (novo["model"] as? String) ?? "NovoPen",
+            "doseCount": doseCount,
+          ]
+        }
+      } catch {
+        let message = error.localizedDescription.lowercased()
+        if message.contains("lost") || message.contains("disconnect") || message.contains("timeout") {
+          throw NSError(
+            domain: "NfcReader",
+            code: 1001,
+            userInfo: [NSLocalizedDescriptionKey: "Scan was too short. Hold the pen steady for 1-2 seconds and rescan."]
+          )
+        }
+        // Fall through to standard tag mode for non-Novo or parse errors.
+      }
+    }
+
+    let uid = Self.uidString(for: tag)
+    guard !uid.isEmpty else {
+      throw NSError(
+        domain: "NfcReader",
+        code: 1002,
+        userInfo: [NSLocalizedDescriptionKey: "Tag detected but UID was empty."]
+      )
+    }
+    return [
+      "mode": "tag",
+      "id": uid,
+      "type": Self.typeString(for: tag),
+      "standard": Self.standardString(for: tag),
+    ]
+  }
+
+  private func readNovoPenPayload(from tag: NFCTag) throws -> [String: Any] {
+    do {
+      return try readNovoPenPayload(tag: tag)
+    } catch NovoPenProtocolError.notIso7816 {
+      throw NSError(
+        domain: "NfcReader",
+        code: 1002,
+        userInfo: [NSLocalizedDescriptionKey: "Incorrect tag detected."]
+      )
+    } catch NovoPenProtocolError.apduFailed {
+      throw NSError(
+        domain: "NfcReader",
+        code: 1002,
+        userInfo: [NSLocalizedDescriptionKey: "NovoPen protocol read failed."]
+      )
+    } catch {
+      throw error
+    }
+  }
 
   /// Map an iOS `NFCReaderError` to a stable `(code, message)` pair shared
   /// with the Dart side. Keep these strings in sync with `_exceptionFor` in
