@@ -163,7 +163,7 @@ class _ReconCalculatorModalState extends State<ReconCalculatorModal> {
                     ],
                   ),
                 ] else
-                  _PlaceholderCard(
+                  const _PlaceholderCard(
                       text: 'Fill in all three fields above to see results'),
               ],
 
@@ -210,7 +210,7 @@ class _ReconCalculatorModalState extends State<ReconCalculatorModal> {
                     ],
                   ),
                 ] else
-                  _PlaceholderCard(
+                  const _PlaceholderCard(
                       text: 'Fill in all three fields above to see results'),
               ],
 
@@ -356,7 +356,7 @@ class _ResultCard extends StatelessWidget {
               Expanded(
                   child: Column(children: [
                 Text(item.label,
-                    style: TextStyle(fontSize: 11, color: AppColors.tealDeep),
+                    style: const TextStyle(fontSize: 11, color: AppColors.tealDeep),
                     textAlign: TextAlign.center),
                 const SizedBox(height: 6),
                 FittedBox(
@@ -367,7 +367,7 @@ class _ResultCard extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                           color: AppColors.tealDark,
                           fontFamily: 'Inter',
-                          fontFeatures: [FontFeature.tabularFigures()],
+                          fontFeatures: [const FontFeature.tabularFigures()],
                         ))),
               ])),
               if (!isLast)

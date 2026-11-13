@@ -100,7 +100,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
             ),
             Expanded(
               child: filtered.isEmpty
-                  ? EmptyState(title: 'No compounds', subtitle: 'Enroll a pen or vial to get started', icon: Icons.inventory_2_outlined)
+                  ? const EmptyState(title: 'No compounds', subtitle: 'Enroll a pen or vial to get started', icon: Icons.inventory_2_outlined)
                   : ListView.builder(
                       padding: const EdgeInsets.all(20),
                       itemCount: filtered.length,
@@ -181,7 +181,7 @@ class _DeviceRow extends StatelessWidget {
                     const SizedBox(width: 6),
                     if (device.nfcTagId != null) BadgeChip(label: 'NFC', bg: context.clrBlueBg, fg: AppColors.blueDark),
                     if (!device.active) const SizedBox(width: 4),
-                    if (!device.active) BadgeChip(label: 'Archived', bg: AppColors.border, fg: AppColors.textSecondary),
+                    if (!device.active) const BadgeChip(label: 'Archived', bg: AppColors.border, fg: AppColors.textSecondary),
                   ]),
                   const SizedBox(height: 3),
                   Text('${device.vendor} · ${device.reconstitutionDate}', style: TextStyle(fontSize: 12, color: context.clrTextSub)),

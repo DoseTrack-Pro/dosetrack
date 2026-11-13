@@ -322,24 +322,24 @@ class _LogDoseModalState extends ConsumerState<LogDoseModal> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: AppColors.blueMid, width: 0.5),
                     ),
-                    child: Row(children: [
-                      const Icon(Icons.nfc_rounded,
+                    child: const Row(children: [
+                      Icon(Icons.nfc_rounded,
                           color: AppColors.blue, size: 20),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10),
                       Expanded(
                           child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                            const Text('Log via NFC instead',
+                            Text('Log via NFC instead',
                                 style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                     color: AppColors.blueDark)),
-                            const Text('Tap to open NFC scanner',
+                            Text('Tap to open NFC scanner',
                                 style: TextStyle(
                                     fontSize: 11, color: AppColors.blue)),
                           ])),
-                      const Icon(Icons.arrow_forward_ios_rounded,
+                      Icon(Icons.arrow_forward_ios_rounded,
                           color: AppColors.blue, size: 14),
                     ]),
                   ),
@@ -485,7 +485,7 @@ class _DoseField extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                   color: enabled ? context.clrText : context.clrTextSub,
                   fontFamily: 'Inter',
-                  fontFeatures: [FontFeature.tabularFigures()],
+                  fontFeatures: [const FontFeature.tabularFigures()],
                 ),
                 decoration: const InputDecoration(
                   isDense: true,

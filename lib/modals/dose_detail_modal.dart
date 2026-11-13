@@ -242,7 +242,7 @@ class _DoseDetailPageState extends ConsumerState<DoseDetailPage> {
                   ],
 
                   // Date & Time
-                  _SectionLabel('DATE & TIME'),
+                  const _SectionLabel('DATE & TIME'),
                   const SizedBox(height: 8),
                   GestureDetector(
                     onTap: _pickDateTime,
@@ -267,7 +267,7 @@ class _DoseDetailPageState extends ConsumerState<DoseDetailPage> {
                   const SizedBox(height: 20),
 
                   // Dose amount — both fields editable, synced
-                  _SectionLabel('DOSE AMOUNT'),
+                  const _SectionLabel('DOSE AMOUNT'),
                   const SizedBox(height: 4),
                   Text('Edit either value — the other updates automatically.',
                       style: TextStyle(fontSize: 11, color: context.clrTextHint)),
@@ -287,9 +287,9 @@ class _DoseDetailPageState extends ConsumerState<DoseDetailPage> {
                         ),
                       ]),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 18),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: const [
+                    const Padding(
+                      padding: EdgeInsets.only(top: 18),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
                         SizedBox(width: 10),
                         Icon(Icons.swap_horiz_rounded, color: AppColors.teal, size: 22),
                         SizedBox(width: 10),
@@ -313,7 +313,7 @@ class _DoseDetailPageState extends ConsumerState<DoseDetailPage> {
                   const SizedBox(height: 20),
 
                   // Injection site
-                  _SectionLabel('INJECTION SITE'),
+                  const _SectionLabel('INJECTION SITE'),
                   const SizedBox(height: 10),
                   BodySitePicker(
                     selectedSite: _selectedSite,
@@ -326,7 +326,7 @@ class _DoseDetailPageState extends ConsumerState<DoseDetailPage> {
                   const SizedBox(height: 20),
 
                   // Notes
-                  _SectionLabel('NOTES'),
+                  const _SectionLabel('NOTES'),
                   const SizedBox(height: 8),
                   TextFormField(
                     controller: _notesCtrl,
